@@ -1,56 +1,71 @@
-# Welcome to your Expo app 👋
+# ShrimpMate Mobile 🦐
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Ứng dụng di động quản lý và giám sát ao nuôi tôm thông minh (IoT & Aquaculture Management) được xây dựng trên nền tảng **React Native**, **Expo (SDK 57)** và **Expo Router** (File-based Routing).
 
-## Get started
+---
 
-1. Install dependencies
+## 🚀 Cấu trúc dự án (Architecture)
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```
+ShrimpMate_Mobile/
+├── assets/                   # Hình ảnh, splash, icons, tab icons
+├── src/
+│   ├── app/                  # Expo Router - File-based routing
+│   │   ├── _layout.tsx       # Root Layout với AuthProvider & ThemeProvider
+│   │   ├── index.tsx         # Trang chủ / Dashboard giám sát ao tôm
+│   │   └── explore.tsx       # Màn hình điều khiển thiết bị & cảnh báo
+│   ├── api/                  # API Client & Services (Axios/Fetch layer)
+│   │   ├── client.ts         # ApiClient xử lý timeout, token interceptor, json parse
+│   │   ├── endpoints.ts      # Danh mục đường dẫn API tập trung
+│   │   └── services/         # auth.service.ts, pond.service.ts, alert.service.ts
+│   ├── components/           # UI Components
+│   │   ├── common/           # Button, StatusBadge, MetricCard, PondCard
+│   │   ├── app-tabs.tsx      # Native Bottom Tabs navigation
+│   │   └── ui/               # Collapsible, etc.
+│   ├── constants/            # Theme, Colors (Aquaculture semantic), Config
+│   ├── context/              # React Context (auth-context.tsx)
+│   ├── hooks/                # Custom hooks (useAuth, usePonds, useTheme)
+│   ├── types/                # TypeScript Interfaces (Pond, SensorMetric, Alert, User, Api)
+│   └── utils/                # Formatters (ngày giờ VN, chỉ số nước), Storage
+├── app.json                  # Cấu hình Expo
+├── tsconfig.json             # TypeScript & Path aliases (@/*)
+└── package.json
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+---
 
-### Other setup steps
+## 🛠️ Hướng dẫn cài đặt & Chạy ứng dụng
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+### 1. Khởi động môi trường phát triển (Metro Bundler)
 
-## Learn more
+```bash
+npm start
+# hoặc:
+npx expo start
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+### 2. Chạy trên thiết bị hoặc máy ảo:
+- **Thiết bị thật (Expo Go)**: Quét mã QR hiển thị trong terminal bằng app Expo Go (trên Android) hoặc Camera (trên iOS).
+- **Android Emulator**: Nhấn phím `a` trong terminal (hoặc chạy `npm run android`).
+- **Web Browser**: Nhấn phím `w` trong terminal (hoặc chạy `npm run web`).
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+---
 
-## Join the community
+## 🧪 Kiểm tra TypeScript
 
-Join our community of developers creating universal apps.
+Để kiểm tra kiểu dữ liệu toàn bộ dự án:
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```bash
+npx tsc --noEmit
+```
+
+---
+
+## ⚙️ Biến môi trường (.env)
+
+Tạo file `.env` từ file mẫu `.env.example`:
+
+```env
+EXPO_PUBLIC_API_URL=https://api.shrimpmate.vn/v1
+EXPO_PUBLIC_SOCKET_URL=wss://api.shrimpmate.vn/ws
+```
