@@ -1,8 +1,26 @@
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
+
+const resolveApiBaseUrl = (): string => {
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
+  if (Platform.OS === 'web') {
+    return 'http://localhost:3000';
+  }
+  const debuggerHost = Constants.expoConfig?.hostUri;
+  if (debuggerHost) {
+    const hostIp = debuggerHost.split(':')[0];
+    return `http://${hostIp}:3000`;
+  }
+  return Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
+};
+
 export const AppConfig = {
   appName: 'ShrimpMate Mobile',
   version: '1.0.0',
-  apiBaseUrl: process.env.EXPO_PUBLIC_API_URL || 'https://api.shrimpmate.vn/v1',
-  socketUrl: process.env.EXPO_PUBLIC_SOCKET_URL || 'wss://api.shrimpmate.vn/ws',
+  apiBaseUrl: resolveApiBaseUrl(),
+  socketUrl: process.env.EXPO_PUBLIC_SOCKET_URL || 'ws://localhost:3000',
   requestTimeoutMs: 15000,
   storageKeys: {
     authToken: '@shrimpmate_auth_token',

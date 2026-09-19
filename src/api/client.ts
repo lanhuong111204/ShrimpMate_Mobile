@@ -6,10 +6,13 @@ interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
   skipAuth?: boolean;
   timeout?: number;
+  _isRetry?: boolean;
 }
 
 class ApiClient {
   private baseUrl: string;
+  private isRefreshing = false;
+  private refreshPromise: Promise<string | null> | null = null;
 
   constructor(baseUrl: string = AppConfig.apiBaseUrl) {
     this.baseUrl = baseUrl;
@@ -37,8 +40,67 @@ class ApiClient {
     return url.toString();
   }
 
+  private async performSilentRefresh(): Promise<string | null> {
+    if (this.isRefreshing && this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
+    this.isRefreshing = true;
+    this.refreshPromise = (async () => {
+      try {
+        const storedRefreshToken = await Storage.getItem(AppConfig.storageKeys.refreshToken);
+        if (!storedRefreshToken) {
+          return null;
+        }
+
+        const refreshUrl = this.buildUrl('/auth/refresh-token');
+        const res = await fetch(refreshUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ refreshToken: storedRefreshToken }),
+        });
+
+        if (!res.ok) {
+          // Refresh token expired or invalid -> clear storage
+          await Storage.removeItem(AppConfig.storageKeys.authToken);
+          await Storage.removeItem(AppConfig.storageKeys.refreshToken);
+          await Storage.removeItem(AppConfig.storageKeys.userData);
+          return null;
+        }
+
+        const data = await res.json();
+        // BE returns: { accessToken, refreshToken, user }
+        const newAccessToken = data.accessToken || data.data?.accessToken;
+        const newRefreshToken = data.refreshToken || data.data?.refreshToken;
+        const user = data.user || data.data?.user;
+
+        if (newAccessToken) {
+          await Storage.setItem(AppConfig.storageKeys.authToken, newAccessToken);
+          if (newRefreshToken) {
+            await Storage.setItem(AppConfig.storageKeys.refreshToken, newRefreshToken);
+          }
+          if (user) {
+            await Storage.setJSON(AppConfig.storageKeys.userData, user);
+          }
+          return newAccessToken;
+        }
+        return null;
+      } catch {
+        return null;
+      } finally {
+        this.isRefreshing = false;
+        this.refreshPromise = null;
+      }
+    })();
+
+    return this.refreshPromise;
+  }
+
   async request<T = any>(endpoint: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
-    const { params, skipAuth = false, timeout = AppConfig.requestTimeoutMs, headers, ...customConfig } = options;
+    const { params, skipAuth = false, timeout = AppConfig.requestTimeoutMs, headers, _isRetry = false, ...customConfig } = options;
 
     const authHeaders = skipAuth ? {} : await this.getAuthHeader();
     const url = this.buildUrl(endpoint, params);
@@ -60,14 +122,44 @@ class ApiClient {
 
       clearTimeout(timeoutId);
 
+      const isAuthEndpoint =
+        endpoint.includes('/auth/login') ||
+        endpoint.includes('/auth/refresh-token') ||
+        endpoint.includes('/auth/forgot-password') ||
+        endpoint.includes('/auth/reset-password');
+
+      // Intercept 401 and try silent token refresh
+      if (response.status === 401 && !isAuthEndpoint && !_isRetry) {
+        const newAccessToken = await this.performSilentRefresh();
+        if (newAccessToken) {
+          return this.request<T>(endpoint, {
+            ...options,
+            _isRetry: true,
+          });
+        }
+      }
+
       const contentType = response.headers.get('content-type');
       const isJson = contentType && contentType.includes('application/json');
       const data = isJson ? await response.json() : await response.text();
 
       if (!response.ok) {
+        let errorMsg = `Lỗi máy chủ (${response.status})`;
+        if (data && typeof data === 'object') {
+          if (Array.isArray(data.message)) {
+            errorMsg = data.message.join(', ');
+          } else if (typeof data.message === 'string') {
+            errorMsg = data.message;
+          } else if (typeof data.error === 'string') {
+            errorMsg = data.error;
+          }
+        } else if (typeof data === 'string' && data.length > 0) {
+          errorMsg = data;
+        }
+
         const error: ApiError = {
           statusCode: response.status,
-          message: data?.message || `HTTP error ${response.status}`,
+          message: errorMsg,
           details: data?.details,
         };
         throw error;
@@ -87,11 +179,18 @@ class ApiClient {
       clearTimeout(timeoutId);
       if (err.name === 'AbortError') {
         throw {
-          message: 'Hết thời gian yêu cầu máy chủ (Timeout). Vui lòng thử lại sau.',
+          message: 'Hết thời gian yêu cầu máy chủ (Timeout). Vui lòng kiểm tra kết nối mạng.',
           statusCode: 408,
         } as ApiError;
       }
-      throw err;
+      if (err?.statusCode) {
+        throw err;
+      }
+      // Network connection failure (e.g. backend offline or unreachable)
+      throw {
+        message: `Không thể kết nối đến máy chủ Backend (${this.baseUrl}). Vui lòng đảm bảo backend đang chạy tại ${this.baseUrl}.`,
+        statusCode: 503,
+      } as ApiError;
     }
   }
 
