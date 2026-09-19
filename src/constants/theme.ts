@@ -15,16 +15,16 @@ export const Colors = {
     backgroundSelected: '#E2E8F0',
     textSecondary: '#3F4850',
 
-    // Material 3 / Tailwind Prototype Tokens
-    primary: '#0284C7',
-    primaryDeep: '#006194',
-    primaryContainer: '#007BB9',
-    primaryLight: '#E0F2FE',
-    primaryFixed: '#CCE5FF',
-    primaryFixedDim: '#93CCFF',
+    // Material 3 / ShrimpMate OS Prototype Tokens
+    primary: '#9D4300',
+    primaryDeep: '#7A3200',
+    primaryContainer: '#F97316',
+    primaryLight: '#FFDBCA',
+    primaryFixed: '#FFDBCA',
+    primaryFixedDim: '#FFB690',
     onPrimary: '#FFFFFF',
-    onPrimaryFixed: '#001D31',
-    onPrimaryFixedVariant: '#004B73',
+    onPrimaryFixed: '#341100',
+    onPrimaryFixedVariant: '#7A3200',
 
     secondary: '#006E2D',
     secondaryContainer: '#7CF994',
@@ -35,45 +35,45 @@ export const Colors = {
     onSecondaryFixed: '#002109',
     onSecondaryFixedVariant: '#005320',
 
-    tertiary: '#A33900',
-    tertiaryContainer: '#CC4900',
-    tertiaryFixed: '#FFDBCE',
-    tertiaryFixedDim: '#FFB599',
+    tertiary: '#006398',
+    tertiaryContainer: '#40A2E7',
+    tertiaryFixed: '#CCE5FF',
+    tertiaryFixedDim: '#93CCFF',
     onTertiary: '#FFFFFF',
-    onTertiaryContainer: '#FFFBFF',
-    onTertiaryFixed: '#370E00',
-    onTertiaryFixedVariant: '#7F2B00',
+    onTertiaryContainer: '#001D31',
+    onTertiaryFixed: '#001D31',
+    onTertiaryFixedVariant: '#004B73',
 
-    surface: '#FAF8FF',
-    surfaceBright: '#FAF8FF',
+    surface: '#F8F9FF',
+    surfaceBright: '#F8F9FF',
     surfaceDim: '#D2D9F4',
     surfaceVariant: '#DAE2FD',
     surfaceContainerLowest: '#FFFFFF',
-    surfaceContainerLow: '#F2F3FF',
-    surfaceContainer: '#EAEDFF',
-    surfaceContainerHigh: '#E2E7FF',
-    surfaceContainerHighest: '#DAE2FD',
+    surfaceContainerLow: '#EFF4FF',
+    surfaceContainer: '#E5EEFF',
+    surfaceContainerHigh: '#DCE9FF',
+    surfaceContainerHighest: '#D3E4FE',
 
-    onSurface: '#131B2E',
-    onSurfaceVariant: '#3F4850',
-    outline: '#707881',
-    outlineVariant: '#BFC7D2',
+    onSurface: '#0B1C30',
+    onSurfaceVariant: '#584237',
+    outline: '#8C7164',
+    outlineVariant: '#E0C0B1',
 
     error: '#BA1A1A',
     errorContainer: '#FFDAD6',
     onErrorContainer: '#93000A',
     onError: '#FFFFFF',
 
-    inverseSurface: '#283044',
-    inverseOnSurface: '#EEF0FF',
-    inversePrimary: '#93CCFF',
+    inverseSurface: '#213145',
+    inverseOnSurface: '#EAF1FF',
+    inversePrimary: '#FFB690',
 
     cardBackground: '#FFFFFF',
-    border: '#BFC7D2',
+    border: '#E0C0B1',
     optimal: '#006E2D',
-    warning: '#CC4900',
+    warning: '#F97316',
     critical: '#BA1A1A',
-    offline: '#707881',
+    offline: '#8C7164',
   },
   dark: {
     text: '#EEF0FF',
@@ -142,6 +142,11 @@ export const Colors = {
     offline: '#8A939E',
   },
 } as const;
+
+export const Gradients = {
+  header: ['#FB923C', '#EA580C'],
+} as const;
+
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 

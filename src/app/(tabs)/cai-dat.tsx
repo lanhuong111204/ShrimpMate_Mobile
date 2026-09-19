@@ -1,571 +1,1059 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
   View,
   ScrollView,
   Pressable,
-  Switch,
+  TextInput,
+  Modal,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/use-theme';
 import { AppHeader } from '@/components/common/app-header';
+import { useFarm, InventoryItem } from '@/context/farm-context';
+import { useAuth } from '@/context/auth-context';
 
-export default function ScreenSchedule() {
+export default function ScreenSettings() {
   const colors = useTheme();
+  const router = useRouter();
+  const { user, refreshUserProfile, changePassword, updateProfile, logout } = useAuth();
+  const { farmInfo, inventory, dispenseFeedBag, addInventoryItem, hopperKg } = useFarm();
 
-  const [cu3Active, setCu3Active] = useState(true);
-  const [cu4Active, setCu4Active] = useState(true);
-  const [c3Amount, setC3Amount] = useState(28);
-  const [c4Amount, setC4Amount] = useState(25);
-  const [showToast, setShowToast] = useState(false);
+  // Active segment: 'account' (Tài khoản & Bảo mật) | 'supplies' (Kho vật tư)
+  const [activeSegment, setActiveSegment] = useState<'account' | 'supplies'>('account');
+  const [isRefreshingProfile, setIsRefreshingProfile] = useState(false);
 
-  const totalFeedToday = 20 + 22 + (cu3Active ? c3Amount : 0) + (cu4Active ? c4Amount : 0);
-  const percentDone = Math.round((38 / totalFeedToday) * 100);
+  // Edit profile modal state
+  const [showEditProfileModal, setShowEditProfileModal] = useState(false);
+  const [editFullName, setEditFullName] = useState('');
+  const [editPhoneNumber, setEditPhoneNumber] = useState('');
+  const [editProfileError, setEditProfileError] = useState<string | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
 
-  const handleRebalance = () => {
-    setC3Amount(27);
-    setC4Amount(27);
+  // Change password modal state
+  const [showChangePassModal, setShowChangePassModal] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showCurrentPass, setShowCurrentPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmNewPass, setShowConfirmNewPass] = useState(false);
+  const [changePassError, setChangePassError] = useState<string | null>(null);
+  const [isChangingPass, setIsChangingPass] = useState(false);
+
+  // Auto-refresh user profile on mount
+  useEffect(() => {
+    refreshUserProfile();
+  }, []);
+
+  const getRoleLabel = (role?: string) => {
+    switch (role) {
+      case 'admin':
+        return 'Quản trị viên hệ thống';
+      case 'farmer':
+        return 'Chủ đầm / Người nuôi tôm';
+      case 'operator':
+      case 'technician':
+        return 'Chủ đầm / Người nuôi tôm';
+      case 'guest_offline':
+        return 'Bà con xem ngoại tuyến';
+      default:
+        return 'Chủ đầm / Người nuôi tôm';
+    }
+  };
+
+  const handleRefreshProfile = async () => {
+    setIsRefreshingProfile(true);
+    try {
+      await refreshUserProfile();
+    } catch (err: any) {
+      console.warn('Lỗi đồng bộ hồ sơ người dùng:', err?.message);
+    } finally {
+      setIsRefreshingProfile(false);
+    }
+  };
+
+  const handleOpenEditProfile = () => {
+    setEditFullName(user?.fullName || farmInfo.farmerName || '');
+    setEditPhoneNumber(user?.phoneNumber || user?.phone || '');
+    setEditProfileError(null);
+    setShowEditProfileModal(true);
+  };
+
+  const handleSaveProfile = async () => {
+    setEditProfileError(null);
+    const trimmedName = editFullName.trim();
+    const trimmedPhone = editPhoneNumber.trim();
+
+    if (!trimmedName || trimmedName.length < 2) {
+      setEditProfileError('Họ và tên phải có ít nhất 2 ký tự');
+      return;
+    }
+    if (trimmedName.length > 150) {
+      setEditProfileError('Họ và tên tối đa 150 ký tự');
+      return;
+    }
+
+    if (trimmedPhone) {
+      const phoneRegex = /^(0|\+84)[0-9]{9}$/;
+      if (!phoneRegex.test(trimmedPhone)) {
+        setEditProfileError('Số điện thoại không hợp lệ (gồm 10 chữ số, ví dụ: 0912345678)');
+        return;
+      }
+    }
+
+    setIsSavingProfile(true);
+    try {
+      await updateProfile({
+        fullName: trimmedName,
+        phoneNumber: trimmedPhone || undefined,
+      });
+      setShowEditProfileModal(false);
+      Alert.alert('Thành Công! 🎉', 'Đã cập nhật thông tin tài khoản thành công.');
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.message || err?.message || 'Không thể cập nhật hồ sơ lúc này';
+      setEditProfileError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    setChangePassError(null);
+    if (!currentPassword) {
+      setChangePassError('Vui lòng nhập mật khẩu hiện tại');
+      return;
+    }
+    if (!newPassword || newPassword.length < 8) {
+      setChangePassError('Mật khẩu mới phải có ít nhất 8 ký tự');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setChangePassError('Mật khẩu xác nhận không khớp');
+      return;
+    }
+    if (currentPassword === newPassword) {
+      setChangePassError('Mật khẩu mới không được trùng với mật khẩu hiện tại');
+      return;
+    }
+
+    setIsChangingPass(true);
+    try {
+      const resMsg = await changePassword({
+        currentPassword,
+        newPassword,
+      });
+      setShowChangePassModal(false);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      Alert.alert(
+        'Đổi Mật Khẩu Thành Công! 🔐',
+        resMsg || 'Đổi mật khẩu thành công, vui lòng đăng nhập lại để đảm bảo an toàn.',
+        [
+          {
+            text: 'Đăng Nhập Lại',
+            onPress: async () => {
+              await logout();
+              router.replace('/(auth)/login');
+            },
+          },
+        ]
+      );
+    } catch (err: any) {
+      setChangePassError(
+        err?.message || 'Mật khẩu hiện tại không đúng hoặc máy chủ không phản hồi'
+      );
+    } finally {
+      setIsChangingPass(false);
+    }
+  };
+
+  const handleLogout = () => {
     Alert.alert(
-      'Cân Bằng Khẩu Phần',
-      'Đã tự động cân bằng chia đều khẩu phần các cữ chiều và tối: 27 kg mỗi cữ!'
+      'Đăng Xuất Tài Khoản',
+      'Bà con có chắc chắn muốn đăng xuất tài khoản kỹ sư khỏi thiết bị này?',
+      [
+        { text: 'Hủy', style: 'cancel' },
+        {
+          text: 'Đăng Xuất',
+          style: 'destructive',
+          onPress: async () => {
+            await logout();
+            router.replace('/(auth)/login');
+          },
+        },
+      ]
     );
   };
 
-  const handleSaveSchedule = () => {
-    setShowToast(true);
-    setTimeout(() => setShowToast(false), 3500);
+  // Supplies inventory states
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [showAddModal, setShowAddModal] = useState(false);
+
+  // New item form
+  const [newName, setNewName] = useState('');
+  const [newSpec, setNewSpec] = useState('Bao 25kg');
+  const [newSubtitle, setNewSubtitle] = useState('Thức ăn nuôi tôm');
+  const [newCount, setNewCount] = useState('20');
+  const [newCategory, setNewCategory] = useState<InventoryItem['category']>('feed');
+
+  const mainFeed = inventory.find((i) => i.id === 'feed-1');
+
+  const filteredItems = inventory.filter((item) => {
+    const matchCategory =
+      selectedCategory === 'all' || item.category === selectedCategory;
+    const matchSearch =
+      !searchTerm ||
+      item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.spec.toLowerCase().includes(searchTerm.toLowerCase());
+    return matchCategory && matchSearch;
+  });
+
+  const handleQuickDispense = () => {
+    if (!mainFeed || mainFeed.stockCount <= 0) {
+      Alert.alert('Cảnh Báo', 'Hết cám số 2 trong kho! Vui lòng nhập thêm bao cám mới.');
+      return;
+    }
+    dispenseFeedBag('feed-1', 25);
+  };
+
+  const handleAddNewItem = () => {
+    const countNum = parseInt(newCount, 10);
+    if (!newName.trim() || isNaN(countNum) || countNum <= 0) {
+      Alert.alert('Lỗi', 'Vui lòng điền tên vật tư và số lượng hợp lệ');
+      return;
+    }
+
+    addInventoryItem({
+      name: newName.trim(),
+      category: newCategory,
+      spec: newSpec,
+      subtitle: newSubtitle,
+      stockCount: countNum,
+      unit: newCategory === 'feed' || newCategory === 'water' ? 'bao' : 'can',
+      totalKgOrL: countNum * 25,
+      stockStatus: countNum > 10 ? 'good' : 'low',
+    });
+
+    setNewName('');
+    setShowAddModal(false);
   };
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.surface }]}>
-      <AppHeader title="Khu Nuôi Bạc Liêu A" />
+      <AppHeader subtitle="Cài Đặt & Tài Khoản" />
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
-        <View style={styles.container}>
-          {/* Pond Context & Sync Bar */}
-          <View
-            style={[
-              styles.contextCard,
-              { backgroundColor: colors.surfaceContainerLowest, borderColor: colors.outlineVariant + '30' },
-            ]}>
-            <View style={styles.contextHeader}>
-              <View style={styles.contextTitleGroup}>
-                <MaterialIcons name="inventory-2" size={22} color={colors.primary} />
-                <Pressable
-                  onPress={() => Alert.alert('Chọn Ao Nuôi', 'Chọn ao để cài đặt lịch cữ riêng:\n• Ao 1\n• Ao 2\n• Ao 3')}
-                  style={styles.contextSelectorBtn}>
-                  <Text style={[styles.contextPondName, { color: colors.onSurface }]}>
-                    AO SỐ 2 — Tôm Thẻ
-                  </Text>
-                  <MaterialIcons name="arrow-drop-down" size={20} color={colors.onSurfaceVariant} />
-                </Pressable>
-              </View>
-
-              <View style={[styles.agePill, { backgroundColor: colors.surfaceContainer }]}>
-                <Text style={[styles.agePillText, { color: colors.onSurfaceVariant }]}>
-                  42 ngày tuổi
-                </Text>
-              </View>
-            </View>
-
-            <View style={[styles.syncBar, { backgroundColor: colors.surfaceContainerLow }]}>
-              <View style={styles.syncBarLeft}>
-                <View style={[styles.statusDot, { backgroundColor: colors.secondary }]} />
-                <Text style={[styles.syncStatusText, { color: colors.secondary }]}>Máy online</Text>
-                <Text style={{ color: colors.outline }}>•</Text>
-                <Text style={[styles.syncDesc, { color: colors.onSurfaceVariant }]}>
-                  Đồng bộ lịch RTC tủ máy
-                </Text>
-              </View>
-              <MaterialIcons name="sync" size={18} color={colors.primary} />
-            </View>
-          </View>
-
-          {/* Daily Target Summary Bento */}
-          <View
-            style={[
-              styles.targetBento,
-              { backgroundColor: colors.surfaceContainerLowest, borderColor: colors.outlineVariant + '30' },
-            ]}>
-            <View style={styles.bentoHeader}>
-              <View style={styles.bentoTitleGroup}>
-                <MaterialIcons name="restaurant" size={18} color={colors.primary} />
-                <Text style={[styles.bentoTitle, { color: colors.onSurface }]}>
-                  KHẨU PHẦN HÔM NAY
-                </Text>
-              </View>
-              <View style={[styles.schedulePill, { backgroundColor: colors.primaryFixed }]}>
-                <Text style={[styles.schedulePillText, { color: colors.onPrimaryFixed }]}>
-                  4 Cữ Theo Lịch
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.bentoGrid}>
-              <View style={[styles.bentoBox, { backgroundColor: colors.surfaceContainerLow }]}>
-                <Text style={[styles.bentoBoxTag, { color: colors.onSurfaceVariant }]}>
-                  KẾ HOẠCH CẢ NGÀY
-                </Text>
-                <View style={styles.numRow}>
-                  <Text style={[styles.bentoBoxNum, { color: colors.onSurface }]}>
-                    {totalFeedToday}
-                  </Text>
-                  <Text style={[styles.bentoBoxUnit, { color: colors.onSurfaceVariant }]}>kg</Text>
-                </View>
-                <Text style={[styles.bentoBoxSub, { color: colors.outline }]}>
-                  ~{(totalFeedToday / 25).toFixed(1)} bao (loại 25kg)
-                </Text>
-              </View>
-
-              <View style={[styles.bentoBox, { backgroundColor: colors.secondaryContainer + '50' }]}>
-                <Text style={[styles.bentoBoxTag, { color: colors.onSecondaryContainer }]}>
-                  ĐÃ RẢI VÀO AO
-                </Text>
-                <View style={styles.numRow}>
-                  <Text style={[styles.bentoBoxNum, { color: colors.secondary }]}>38</Text>
-                  <Text style={[styles.bentoBoxUnit, { color: colors.secondary }]}>
-                    / {totalFeedToday} kg
-                  </Text>
-                </View>
-                <View style={styles.bentoProgressRow}>
-                  <Text style={[styles.bentoProgressText, { color: colors.secondary }]}>Tiến độ</Text>
-                  <Text style={[styles.bentoProgressVal, { color: colors.secondary }]}>
-                    {percentDone}%
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Progress Bar */}
-            <View style={[styles.progressTrack, { backgroundColor: colors.surfaceContainer }]}>
-              <View
-                style={[
-                  styles.progressIndicator,
-                  { width: `${percentDone}%`, backgroundColor: colors.secondary },
-                ]}
-              />
-            </View>
-
-            {/* AI Weather Prompt Pill */}
-            <View style={[styles.aiPill, { backgroundColor: colors.primaryFixed + '50' }]}>
-              <View style={[styles.aiIconBox, { backgroundColor: colors.primary }]}>
-                <MaterialIcons name="auto-awesome" size={16} color="#FFFFFF" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.aiTitle, { color: colors.onSurface }]}>
-                  Đề xuất thích ứng thời tiết
-                </Text>
-                <Text style={[styles.aiDesc, { color: colors.onSurfaceVariant }]}>
-                  Nắng tốt, nước <Text style={{ fontWeight: '800', color: colors.onSurface }}>29.5°C</Text>, tôm quẫy ăn sung. Máy đã tự động cộng{' '}
-                  <Text style={{ fontWeight: '800', color: colors.primary }}>+5 kg</Text> vào cữ trưa & chiều.
-                </Text>
-              </View>
-            </View>
-
-            {/* Rebalance Button */}
-            <Pressable
-              onPress={handleRebalance}
-              style={({ pressed }) => [
-                styles.rebalanceBtn,
-                { backgroundColor: colors.surfaceContainer, opacity: pressed ? 0.85 : 1 },
-              ]}>
-              <MaterialIcons name="balance" size={18} color={colors.primary} />
-              <Text style={[styles.rebalanceBtnText, { color: colors.primary }]}>
-                Tự động chia đều cho các cữ
-              </Text>
-            </Pressable>
-          </View>
-
-          {/* Sessions Heading */}
-          <View style={styles.sessionsHeadingRow}>
-            <View style={styles.sessionsHeadingLeft}>
-              <MaterialIcons name="schedule" size={20} color={colors.primary} />
-              <Text style={[styles.sessionsHeadingTitle, { color: colors.onSurface }]}>
-                Các Cữ Ăn Trong Ngày
-              </Text>
-            </View>
-            <Text style={[styles.sessionsHeadingSub, { color: colors.onSurfaceVariant }]}>
-              4 cữ thiết lập
-            </Text>
-          </View>
-
-          {/* CỮ 1: COMPLETE */}
-          <View
-            style={[
-              styles.sessionCard,
-              { backgroundColor: colors.surfaceContainerLowest, borderColor: colors.outlineVariant + '30' },
-            ]}>
-            <View style={styles.sessionHeader}>
-              <View style={styles.sessionHeaderLeft}>
-                <View style={[styles.sessionIconBox, { backgroundColor: colors.secondary }]}>
-                  <MaterialIcons name="check" size={18} color="#FFFFFF" />
-                </View>
-                <View>
-                  <Text style={[styles.sessionName, { color: colors.onSurface }]}>Cữ 1 • 07:00</Text>
-                  <Text style={[styles.sessionSub, { color: colors.outline }]}>Buổi sáng</Text>
-                </View>
-              </View>
-
-              <View style={[styles.statusBadge, { backgroundColor: colors.secondaryContainer }]}>
-                <MaterialIcons name="task-alt" size={13} color={colors.onSecondaryContainer} />
-                <Text style={[styles.statusBadgeText, { color: colors.onSecondaryContainer }]}>
-                  HOÀN THÀNH 100%
-                </Text>
-              </View>
-            </View>
-
-            <View style={[styles.sessionInfoGrid, { backgroundColor: colors.surfaceContainerLow }]}>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.sessionMetaLabel, { color: colors.outline }]}>Lượng rải</Text>
-                <Text style={[styles.sessionMetaVal, { color: colors.onSurface }]}>
-                  20 kg <Text style={{ fontWeight: '500', color: colors.onSurfaceVariant }}>/ 25 phút</Text>
-                </Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.sessionMetaLabel, { color: colors.outline }]}>Nhịp phun</Text>
-                <Text style={[styles.sessionMetaVal, { color: colors.onSurface }]}>
-                  4s phun <Text style={{ fontWeight: '500', color: colors.onSurfaceVariant }}>/ 25s nghỉ</Text>
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.sessionNoteRow}>
-              <MaterialIcons name="verified" size={15} color={colors.secondary} />
-              <Text style={[styles.sessionNoteText, { color: colors.secondary }]}>
-                Đã rải xong lúc 07:25 • Nhá tôm ăn hết 100%
-              </Text>
-            </View>
-          </View>
-
-          {/* CỮ 2: RUNNING */}
-          <View
-            style={[
-              styles.sessionCard,
-              styles.runningBorder,
-              {
-                backgroundColor: colors.surfaceContainerLowest,
-                borderColor: colors.primary,
-              },
-            ]}>
-            <View style={[styles.runningTopStrip, { backgroundColor: colors.primary }]} />
-            <View style={styles.sessionHeader}>
-              <View style={styles.sessionHeaderLeft}>
-                <View style={[styles.sessionIconBox, { backgroundColor: colors.primary }]}>
-                  <MaterialIcons name="cyclone" size={18} color="#FFFFFF" />
-                </View>
-                <View>
-                  <Text style={[styles.sessionName, { color: colors.onSurface }]}>Cữ 2 • 10:30</Text>
-                  <Text style={[styles.sessionSub, { color: colors.primary }]}>
-                    Đang quay rải cám...
-                  </Text>
-                </View>
-              </View>
-
-              <View style={[styles.statusBadge, { backgroundColor: colors.primaryFixed }]}>
-                <View style={[styles.statusDot, { backgroundColor: colors.primary }]} />
-                <Text style={[styles.statusBadgeText, { color: colors.onPrimaryFixed }]}>
-                  ĐANG RẢI CÁM
-                </Text>
-              </View>
-            </View>
-
-            <View style={[styles.runningDetailBox, { backgroundColor: colors.surfaceContainerLow }]}>
-              <View style={styles.runningProgressHeader}>
-                <Text style={[styles.runningProgressLabel, { color: colors.onSurfaceVariant }]}>
-                  Tiến độ cữ này
-                </Text>
-                <Text style={[styles.runningProgressVal, { color: colors.primary }]}>
-                  18 <Text style={{ fontSize: 12, color: colors.onSurface }}>/ 22 kg</Text>
-                </Text>
-              </View>
-
-              <View style={[styles.progressTrack, { backgroundColor: colors.surfaceContainer }]}>
-                <View style={[styles.progressIndicator, { width: '82%', backgroundColor: colors.primary }]} />
-              </View>
-
-              <View style={styles.runningTimeRow}>
-                <Text style={[styles.runningTimeText, { color: colors.onSurfaceVariant }]}>
-                  Thời gian còn lại: ~4 phút
-                </Text>
-                <Text style={[styles.runningTimeText, { color: colors.onSurfaceVariant }]}>
-                  Phun 5s / Nghỉ 20s
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.runningActionRow}>
-              <Pressable
-                onPress={() => Alert.alert('Tạm Dừng', 'Đã gửi lệnh tạm dừng Cữ 2 tới máy')}
-                style={({ pressed }) => [
-                  styles.btnHalfAction,
-                  { backgroundColor: colors.surfaceContainer, opacity: pressed ? 0.85 : 1 },
-                ]}>
-                <MaterialIcons name="pause-circle" size={18} color={colors.primary} />
-                <Text style={[styles.btnHalfText, { color: colors.primary }]}>Tạm Dừng Cữ</Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => Alert.alert('Dừng Khẩn Cấp', 'Đã ngắt dừng khẩn cấp Cữ 2')}
-                style={({ pressed }) => [
-                  styles.btnHalfAction,
-                  { backgroundColor: colors.errorContainer, opacity: pressed ? 0.85 : 1 },
-                ]}>
-                <MaterialIcons name="stop-circle" size={18} color={colors.onErrorContainer} />
-                <Text style={[styles.btnHalfText, { color: colors.onErrorContainer }]}>
-                  Dừng Khẩn Cấp
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-
-          {/* CỮ 3: INTERACTIVE STEPPER */}
-          <View
-            style={[
-              styles.sessionCard,
-              { backgroundColor: colors.surfaceContainerLowest, borderColor: colors.outlineVariant + '30' },
-            ]}>
-            <View style={styles.sessionHeader}>
-              <View style={styles.sessionHeaderLeft}>
-                <View style={[styles.sessionIconBox, { backgroundColor: colors.surfaceContainerHigh }]}>
-                  <MaterialIcons name="alarm" size={18} color={colors.onSurface} />
-                </View>
-                <View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Text style={[styles.sessionName, { color: colors.onSurface }]}>
-                      Cữ 3 • 14:30
-                    </Text>
-                    <Pressable onPress={() => Alert.alert('Đổi Giờ', 'Chọn giờ cữ ăn: Từ 13:00 đến 16:00')}>
-                      <MaterialIcons name="edit-calendar" size={15} color={colors.outline} />
-                    </Pressable>
-                  </View>
-                  <Text style={[styles.sessionSub, { color: colors.onSurfaceVariant }]}>
-                    Cữ chiều sung tôm
-                  </Text>
-                </View>
-              </View>
-
-              <Switch
-                value={cu3Active}
-                onValueChange={setCu3Active}
-                trackColor={{ false: colors.outlineVariant, true: colors.secondary }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
-
-            {cu3Active && (
-              <View style={[styles.stepperContainer, { backgroundColor: colors.surfaceContainerLow }]}>
-                <View style={styles.stepperHeader}>
-                  <Text style={[styles.stepperHeaderTag, { color: colors.onSurfaceVariant }]}>
-                    ĐIỀU CHỈNH KHẨU PHẦN CỮ 3
-                  </Text>
-                  <View style={[styles.tipPill, { backgroundColor: colors.tertiaryFixed }]}>
-                    <Text style={[styles.tipPillText, { color: colors.onTertiaryFixed }]}>
-                      Gợi ý: +3 kg
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.stepperRow}>
-                  <Pressable
-                    onPress={() => setC3Amount((a) => Math.max(4, a - 2))}
-                    style={[styles.stepBtn, { backgroundColor: colors.surfaceContainerLowest }]}>
-                    <Text style={[styles.stepBtnText, { color: colors.onSurface }]}>- 2kg</Text>
-                  </Pressable>
-
-                  <View style={styles.stepNumCol}>
-                    <View style={styles.numRow}>
-                      <Text style={[styles.stepBigNum, { color: colors.primary }]}>{c3Amount}</Text>
-                      <Text style={[styles.stepBigUnit, { color: colors.onSurfaceVariant }]}>kg</Text>
-                    </View>
-                    <Text style={[styles.stepDuration, { color: colors.outline }]}>
-                      Rải trong 32 phút
-                    </Text>
-                  </View>
-
-                  <Pressable
-                    onPress={() => setC3Amount((a) => Math.min(60, a + 2))}
-                    style={[styles.stepBtn, { backgroundColor: colors.primary }]}>
-                    <Text style={[styles.stepBtnText, { color: '#FFFFFF' }]}>+ 2kg</Text>
-                  </Pressable>
-                </View>
-              </View>
-            )}
-
-            <View style={styles.tempoRow}>
-              <View style={styles.tempoLeft}>
-                <MaterialIcons name="timer" size={15} color={colors.onSurfaceVariant} />
-                <Text style={[styles.tempoText, { color: colors.onSurfaceVariant }]}>
-                  Phun 5s / Nghỉ 20s
-                </Text>
-              </View>
-              <Pressable onPress={() => Alert.alert('Nhịp Phun', 'Cài đặt nhịp phun: 5s phun / 20s nghỉ')}>
-                <Text style={[styles.tempoBtnText, { color: colors.primary }]}>Sửa nhịp phun</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          {/* CỮ 4: NIGHT SCHEDULE WITH SAFETY INTERLOCK */}
-          <View
-            style={[
-              styles.sessionCard,
-              { backgroundColor: colors.surfaceContainerLowest, borderColor: colors.outlineVariant + '30' },
-            ]}>
-            <View style={styles.sessionHeader}>
-              <View style={styles.sessionHeaderLeft}>
-                <View style={[styles.sessionIconBox, { backgroundColor: colors.surfaceContainerHigh }]}>
-                  <MaterialIcons name="dark-mode" size={18} color={colors.onSurface} />
-                </View>
-                <View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Text style={[styles.sessionName, { color: colors.onSurface }]}>
-                      Cữ 4 • 18:00
-                    </Text>
-                    <Pressable onPress={() => Alert.alert('Đổi Giờ', 'Chọn giờ cữ tối')}>
-                      <MaterialIcons name="edit-calendar" size={15} color={colors.outline} />
-                    </Pressable>
-                  </View>
-                  <Text style={[styles.sessionSub, { color: colors.onSurfaceVariant }]}>
-                    Cữ chập tối
-                  </Text>
-                </View>
-              </View>
-
-              <Switch
-                value={cu4Active}
-                onValueChange={setCu4Active}
-                trackColor={{ false: colors.outlineVariant, true: colors.secondary }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
-
-            {cu4Active && (
-              <View style={[styles.stepperContainer, { backgroundColor: colors.surfaceContainerLow }]}>
-                <View style={styles.stepperHeader}>
-                  <Text style={[styles.stepperHeaderTag, { color: colors.onSurfaceVariant }]}>
-                    LƯỢNG CÁM CỮ TỐI
-                  </Text>
-                  <Text style={[styles.tipPillText, { color: colors.secondary }]}>Ổn định</Text>
-                </View>
-
-                <View style={styles.stepperRow}>
-                  <Pressable
-                    onPress={() => setC4Amount((a) => Math.max(4, a - 2))}
-                    style={[styles.stepBtn, { backgroundColor: colors.surfaceContainerLowest }]}>
-                    <Text style={[styles.stepBtnText, { color: colors.onSurface }]}>- 2kg</Text>
-                  </Pressable>
-
-                  <View style={styles.stepNumCol}>
-                    <View style={styles.numRow}>
-                      <Text style={[styles.stepBigNum, { color: colors.onSurface }]}>{c4Amount}</Text>
-                      <Text style={[styles.stepBigUnit, { color: colors.onSurfaceVariant }]}>kg</Text>
-                    </View>
-                    <Text style={[styles.stepDuration, { color: colors.outline }]}>
-                      Rải trong 30 phút
-                    </Text>
-                  </View>
-
-                  <Pressable
-                    onPress={() => setC4Amount((a) => Math.min(60, a + 2))}
-                    style={[styles.stepBtn, { backgroundColor: colors.surfaceContainerLowest }]}>
-                    <Text style={[styles.stepBtnText, { color: colors.onSurface }]}>+ 2kg</Text>
-                  </Pressable>
-                </View>
-              </View>
-            )}
-
-            <View style={[styles.interlockAlert, { backgroundColor: colors.errorContainer + '40' }]}>
-              <MaterialIcons name="lock" size={18} color={colors.error} />
-              <Text style={[styles.interlockAlertText, { color: colors.onErrorContainer }]}>
-                Điều kiện an toàn: Tự động khóa không rải nếu Oxy hòa tan lúc 18:00 thấp hơn 4.0 mg/L.
-              </Text>
-            </View>
-          </View>
-
-          {/* Add Extra Feeding Session */}
+      {/* Segmented Tab Switcher */}
+      <View style={styles.segmentWrapper}>
+        <View style={[styles.segmentContainer, { backgroundColor: colors.surfaceContainerLow }]}>
           <Pressable
-            onPress={() => Alert.alert('Thêm Cữ Mới', 'Có thể tạo thêm cữ khuya 22:00 hoặc cữ xế 16:30')}
-            style={({ pressed }) => [
-              styles.addSessionBtn,
-              { backgroundColor: colors.surfaceContainerLowest, opacity: pressed ? 0.85 : 1 },
+            onPress={() => setActiveSegment('account')}
+            style={[
+              styles.segmentBtn,
+              activeSegment === 'account' && styles.segmentBtnActive,
             ]}>
-            <View style={[styles.addCircle, { backgroundColor: colors.primaryFixed }]}>
-              <MaterialIcons name="add" size={18} color={colors.onPrimaryFixed} />
-            </View>
-            <Text style={[styles.addSessionText, { color: colors.primary }]}>
-              + THÊM CỮ ĂN MỚI TRONG NGÀY
+            <MaterialIcons
+              name="person"
+              size={18}
+              color={activeSegment === 'account' ? '#EA580C' : '#8C7164'}
+            />
+            <Text
+              style={[
+                styles.segmentBtnText,
+                activeSegment === 'account' && styles.segmentBtnTextActive,
+              ]}>
+              Tài Khoản & Bảo Mật
             </Text>
           </Pressable>
 
-          {/* Pond Safety Interlock Card */}
-          <View style={[styles.safetyCard, { backgroundColor: colors.tertiaryFixed + '40' }]}>
-            <View style={styles.safetyHeader}>
-              <MaterialIcons name="health-and-safety" size={22} color={colors.tertiary} />
-              <Text style={[styles.safetyTitle, { color: colors.onTertiaryFixed }]}>
-                KHÓA BẢO VỆ ĐÁY AO & ĐƯỜNG RUỘT TÔM
-              </Text>
-            </View>
-            <Text style={[styles.safetyDesc, { color: colors.onTertiaryFixedVariant }]}>
-              Hệ thống ShrimpMate sẽ <Text style={{ fontWeight: '800' }}>tự động tạm hoãn</Text> bất
-              kỳ cữ rải cám nào nếu cảm biến đo được:
-            </Text>
-
-            <View style={styles.safetyGrid}>
-              <View style={[styles.safetyBox, { backgroundColor: colors.surfaceContainerLowest + 'D0' }]}>
-                <MaterialIcons name="air" size={18} color={colors.error} />
-                <View>
-                  <Text style={[styles.safetyBoxLabel, { color: colors.outline }]}>Oxy hòa tan</Text>
-                  <Text style={[styles.safetyBoxVal, { color: colors.error }]}>&lt; 3.5 mg/L</Text>
-                </View>
-              </View>
-
-              <View style={[styles.safetyBox, { backgroundColor: colors.surfaceContainerLowest + 'D0' }]}>
-                <MaterialIcons name="device-thermostat" size={18} color={colors.tertiary} />
-                <View>
-                  <Text style={[styles.safetyBoxLabel, { color: colors.outline }]}>Nhiệt độ nước</Text>
-                  <Text style={[styles.safetyBoxVal, { color: colors.tertiary }]}>&gt; 33.0 °C</Text>
-                </View>
-              </View>
-            </View>
-          </View>
-
-          {/* Big Sticky Action Save */}
-          <View style={styles.saveSection}>
-            <Pressable
-              onPress={handleSaveSchedule}
-              style={({ pressed }) => [
-                styles.saveBtn,
-                { backgroundColor: colors.primary, opacity: pressed ? 0.9 : 1 },
+          <Pressable
+            onPress={() => setActiveSegment('supplies')}
+            style={[
+              styles.segmentBtn,
+              activeSegment === 'supplies' && styles.segmentBtnActive,
+            ]}>
+            <MaterialIcons
+              name="inventory-2"
+              size={18}
+              color={activeSegment === 'supplies' ? '#EA580C' : '#8C7164'}
+            />
+            <Text
+              style={[
+                styles.segmentBtnText,
+                activeSegment === 'supplies' && styles.segmentBtnTextActive,
               ]}>
-              <MaterialIcons name="save" size={22} color="#FFFFFF" />
-              <Text style={styles.saveBtnText}>LƯU & GỬI LỊCH VÀO TỦ MÁY</Text>
-            </Pressable>
-
-            <View style={styles.rtcSubRow}>
-              <MaterialIcons name="offline-bolt" size={16} color={colors.secondary} />
-              <Text style={[styles.rtcSubText, { color: colors.onSurfaceVariant }]}>
-                Tủ máy có chip RTC độc lập: Mất sóng 4G/WiFi vẫn tự rải cám chính xác tuyệt đối.
-              </Text>
-            </View>
-          </View>
-        </View>
-      </ScrollView>
-
-      {/* Toast Notification */}
-      {showToast && (
-        <View style={[styles.toastContainer, { backgroundColor: colors.inverseSurface }]}>
-          <MaterialIcons name="check-circle" size={24} color={colors.secondaryFixed} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.toastTitle}>Đã gửi lịch thành công!</Text>
-            <Text style={[styles.toastSub, { color: colors.surfaceVariant }]}>
-              Tủ máy Ao 2 đã nhận và cập nhật thời gian RTC.
+              Kho Vật Tư Bờ Ao
             </Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshingProfile}
+            onRefresh={handleRefreshProfile}
+            colors={['#EA580C']}
+            tintColor="#EA580C"
+          />
+        }>
+        <View style={styles.container}>
+          {activeSegment === 'account' ? (
+            /* ==================================================== */
+            /* SEGMENT 1: TÀI KHOẢN & BẢO MẬT                        */
+            /* ==================================================== */
+            <View style={styles.accountSection}>
+              {/* Profile Card */}
+              <View
+                style={[
+                  styles.profileCard,
+                  {
+                    backgroundColor: colors.surfaceContainerLowest,
+                    borderColor: colors.outlineVariant + '40',
+                  },
+                ]}>
+                <View style={styles.profileHeader}>
+                  <View style={styles.profileAvatarBox}>
+                    <MaterialIcons name="agriculture" size={36} color="#EA580C" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.profileName, { color: colors.onSurface }]}>
+                      {user?.fullName || farmInfo.farmerName}
+                    </Text>
+                    <View style={styles.roleBadge}>
+                      <MaterialIcons name="badge" size={14} color="#006E2D" />
+                      <Text style={styles.roleBadgeText}>{getRoleLabel(user?.role)}</Text>
+                    </View>
+                  </View>
+                  {/* Subtle Sync Icon Button */}
+                  <Pressable
+                    onPress={handleRefreshProfile}
+                    disabled={isRefreshingProfile}
+                    hitSlop={10}
+                    style={({ pressed }) => [
+                      styles.btnIconSync,
+                      { opacity: pressed || isRefreshingProfile ? 0.6 : 1 },
+                    ]}>
+                    {isRefreshingProfile ? (
+                      <ActivityIndicator size="small" color="#EA580C" />
+                    ) : (
+                      <MaterialIcons name="sync" size={20} color="#8C7164" />
+                    )}
+                  </Pressable>
+                </View>
+
+                {/* Profile Details Grid */}
+                <View style={[styles.profileGrid, { backgroundColor: colors.surfaceContainerLow }]}>
+                  <View style={styles.detailRow}>
+                    <View style={styles.detailLabelGroup}>
+                      <MaterialIcons name="phone" size={16} color="#8C7164" />
+                      <Text style={styles.detailLabel}>Số điện thoại:</Text>
+                    </View>
+                    <Text style={[styles.detailValue, { color: colors.onSurface }]}>
+                      {user?.phoneNumber || user?.phone || 'Chưa cập nhật'}
+                    </Text>
+                  </View>
+
+                  <View style={styles.detailRow}>
+                    <View style={styles.detailLabelGroup}>
+                      <MaterialIcons name="mail" size={16} color="#8C7164" />
+                      <Text style={styles.detailLabel}>Địa chỉ Email:</Text>
+                    </View>
+                    <Text style={[styles.detailValue, { color: colors.onSurface }]}>
+                      {user?.email || 'Chưa cập nhật'}
+                    </Text>
+                  </View>
+
+                  <View style={styles.detailRow}>
+                    <View style={styles.detailLabelGroup}>
+                      <MaterialIcons name="check-circle" size={16} color="#006E2D" />
+                      <Text style={styles.detailLabel}>Trạng thái:</Text>
+                    </View>
+                    <View style={styles.statusPill}>
+                      <View style={styles.statusDot} />
+                      <Text style={styles.statusPillText}>
+                        {user?.isActive !== false ? 'Đang hoạt động' : 'Tạm khóa'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Edit Profile Action Button */}
+                <Pressable
+                  onPress={handleOpenEditProfile}
+                  style={({ pressed }) => [
+                    styles.btnEditProfile,
+                    { opacity: pressed ? 0.8 : 1 },
+                  ]}>
+                  <MaterialIcons name="edit" size={16} color="#EA580C" />
+                  <Text style={styles.btnEditProfileText}>CHỈNH SỬA THÔNG TIN CÁ NHÂN</Text>
+                </Pressable>
+              </View>
+
+              {/* Security & Change Password Card */}
+              <View
+                style={[
+                  styles.securityCard,
+                  {
+                    backgroundColor: colors.surfaceContainerLowest,
+                    borderColor: colors.outlineVariant + '40',
+                  },
+                ]}>
+                <View style={styles.cardTitleRow}>
+                  <MaterialIcons name="lock-reset" size={22} color="#EA580C" />
+                  <Text style={[styles.cardTitleText, { color: colors.onSurface }]}>
+                    BẢO MẬT & ĐỔI MẬT KHẨU
+                  </Text>
+                </View>
+                <Text style={styles.cardDescText}>
+                  Đổi mật khẩu định kỳ giúp bảo vệ quyền điều khiển thiết bị máy ăn, cảm biến ao nuôi và an toàn dữ liệu vụ nuôi.
+                </Text>
+
+                <Pressable
+                  onPress={() => {
+                    setChangePassError(null);
+                    setCurrentPassword('');
+                    setNewPassword('');
+                    setConfirmNewPassword('');
+                    setShowChangePassModal(true);
+                  }}
+                  style={({ pressed }) => [
+                    styles.btnOpenChangePass,
+                    { opacity: pressed ? 0.85 : 1 },
+                  ]}>
+                  <MaterialIcons name="password" size={20} color="#FFFFFF" />
+                  <Text style={styles.btnOpenChangePassText}>ĐỔI MẬT KHẨU KỸ SƯ</Text>
+                </Pressable>
+              </View>
+
+              {/* Farm Context & Station Information */}
+              <View
+                style={[
+                  styles.farmInfoCard,
+                  {
+                    backgroundColor: colors.surfaceContainerLowest,
+                    borderColor: colors.outlineVariant + '40',
+                  },
+                ]}>
+                <View style={styles.cardTitleRow}>
+                  <MaterialIcons name="water" size={22} color="#006398" />
+                  <Text style={[styles.cardTitleText, { color: colors.onSurface }]}>
+                    THÔNG TIN TRANG TRẠI LIÊN KẾT
+                  </Text>
+                </View>
+                <View style={styles.farmDetailsGrid}>
+                  <View style={styles.farmRow}>
+                    <Text style={styles.farmLabel}>Trang trại:</Text>
+                    <Text style={styles.farmVal}>{farmInfo.farmName}</Text>
+                  </View>
+                  <View style={styles.farmRow}>
+                    <Text style={styles.farmLabel}>Khu vực nuôi:</Text>
+                    <Text style={styles.farmVal}>{farmInfo.location}</Text>
+                  </View>
+                  <View style={styles.farmRow}>
+                    <Text style={styles.farmLabel}>Độ mặn trạm:</Text>
+                    <Text style={[styles.farmVal, { color: '#006E2D', fontWeight: '900' }]}>
+                      {farmInfo.salinity}‰ (Đạt chuẩn)
+                    </Text>
+                  </View>
+                  <View style={styles.farmRow}>
+                    <Text style={styles.farmLabel}>Lịch con nước:</Text>
+                    <Text style={styles.farmVal}>{farmInfo.tideInfo}</Text>
+                  </View>
+                  <View style={styles.farmRow}>
+                    <Text style={styles.farmLabel}>Chứng nhận:</Text>
+                    <Text style={[styles.farmVal, { color: '#006E2D', fontWeight: '800' }]}>
+                      VietGAP Aquaculture 2026
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Logout Button */}
+              <Pressable
+                onPress={handleLogout}
+                style={({ pressed }) => [
+                  styles.btnLogout,
+                  { opacity: pressed ? 0.85 : 1 },
+                ]}>
+                <MaterialIcons name="logout" size={22} color="#BA1A1A" />
+                <Text style={styles.btnLogoutText}>ĐĂNG XUẤT KHỎI HỆ THỐNG</Text>
+              </Pressable>
+
+              <Text style={styles.versionText}>ShrimpMate Mobile v1.0.0 • Expo SDK 57</Text>
+            </View>
+          ) : (
+            /* ==================================================== */
+            /* SEGMENT 2: KHO HÀNG VẬT TƯ (Feed, Probiotics, Minerals) */
+            /* ==================================================== */
+            <View style={styles.suppliesSection}>
+              {/* Top Filter Chips & Add Button */}
+              <View style={styles.filterTopRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipsScroll}>
+              <Pressable
+                onPress={() => setSelectedCategory('all')}
+                style={[
+                  styles.filterChip,
+                  selectedCategory === 'all' && styles.filterChipActive,
+                ]}>
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    selectedCategory === 'all' && styles.filterChipTextActive,
+                  ]}>
+                  Tất Cả
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setSelectedCategory('feed')}
+                style={[
+                  styles.filterChip,
+                  selectedCategory === 'feed' && styles.filterChipActive,
+                ]}>
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    selectedCategory === 'feed' && styles.filterChipTextActive,
+                  ]}>
+                  Cám Cho Ăn
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setSelectedCategory('probiotics')}
+                style={[
+                  styles.filterChip,
+                  selectedCategory === 'probiotics' && styles.filterChipActive,
+                ]}>
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    selectedCategory === 'probiotics' && styles.filterChipTextActive,
+                  ]}>
+                  Men Vi Sinh
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setSelectedCategory('water')}
+                style={[
+                  styles.filterChip,
+                  selectedCategory === 'water' && styles.filterChipActive,
+                ]}>
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    selectedCategory === 'water' && styles.filterChipTextActive,
+                  ]}>
+                  Khoáng Tạt
+                </Text>
+              </Pressable>
+            </ScrollView>
+
+            <Pressable
+              onPress={() => setShowAddModal(true)}
+              style={({ pressed }) => [
+                styles.btnAddSupply,
+                { opacity: pressed ? 0.85 : 1 },
+              ]}>
+              <MaterialIcons name="add" size={22} color="#FFFFFF" />
+            </Pressable>
+          </View>
+
+          {/* High-visibility Sunlight Search Bar */}
+          <View
+            style={[
+              styles.searchBar,
+              {
+                backgroundColor: colors.surfaceContainerLowest,
+                borderColor: colors.outlineVariant + '40',
+              },
+            ]}>
+            <MaterialIcons name="search" size={22} color="#8C7164" />
+            <TextInput
+              style={[styles.searchInput, { color: colors.onSurface }]}
+              placeholder="Tìm kiếm bao cám, vi sinh BZT, khoáng..."
+              placeholderTextColor="#8C7164"
+              value={searchTerm}
+              onChangeText={setSearchTerm}
+            />
+            {!!searchTerm && (
+              <Pressable onPress={() => setSearchTerm('')}>
+                <MaterialIcons name="cancel" size={18} color="#8C7164" />
+              </Pressable>
+            )}
+          </View>
+
+          {/* Hero Action: Quick Feed Dispense into Hopper */}
+          {mainFeed && (
+            <View
+              style={[
+                styles.dispenseCard,
+                {
+                  backgroundColor: colors.surfaceContainerLowest,
+                  borderColor: '#F97316',
+                },
+              ]}>
+              <View style={styles.dispenseHeader}>
+                <View style={styles.dispenseBadge}>
+                  <MaterialIcons name="bolt" size={16} color="#9D4300" />
+                  <Text style={styles.dispenseBadgeText}>NẠP NHANH BỜ AO</Text>
+                </View>
+                <Text style={styles.hopperStatusText}>
+                  Thùng máy hiện có: <Text style={{ fontWeight: '900', color: '#F97316' }}>{hopperKg} kg</Text>
+                </Text>
+              </View>
+
+              <View style={styles.dispenseBody}>
+                <View style={styles.feedIconSquare}>
+                  <MaterialIcons name="inventory-2" size={24} color="#9D4300" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.dispenseTitle, { color: colors.onSurface }]}>
+                    {mainFeed.name}
+                  </Text>
+                  <Text style={styles.dispenseSub}>{mainFeed.spec}</Text>
+                  <Text style={styles.dispenseStock}>
+                    Kho còn:{' '}
+                    <Text style={{ fontWeight: '900', color: '#006E2D' }}>
+                      {mainFeed.stockCount} {mainFeed.unit}
+                    </Text>{' '}
+                    ({mainFeed.totalKgOrL} kg)
+                  </Text>
+                </View>
+              </View>
+
+              <Pressable
+                onPress={handleQuickDispense}
+                style={({ pressed }) => [
+                  styles.btnQuickDispense,
+                  { opacity: pressed ? 0.9 : 1 },
+                ]}>
+                <MaterialIcons name="file-upload" size={22} color="#FFFFFF" />
+                <Text style={styles.btnQuickDispenseText}>
+                  XUẤT 1 BAO VÀO MÁY ĂN (NẠP 25KG)
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
+          {/* Inventory Items List */}
+          <View style={styles.sectionTitleRow}>
+            <Text style={[styles.sectionHeading, { color: colors.onSurface }]}>
+              DANH MỤC VẬT TƯ TRANG TRẠI ({filteredItems.length})
+            </Text>
+          </View>
+
+          <View style={styles.inventoryList}>
+            {filteredItems.map((item) => {
+              const isLow = item.stockStatus === 'low';
+              const isFeed = item.category === 'feed';
+
+              return (
+                <View
+                  key={item.id}
+                  style={[
+                    styles.itemCard,
+                    {
+                      backgroundColor: colors.surfaceContainerLowest,
+                      borderColor: isLow ? '#FFDAD6' : colors.outlineVariant + '40',
+                    },
+                  ]}>
+                  <View style={styles.itemCardLeft}>
+                    <View
+                      style={[
+                        styles.categoryIconCircle,
+                        {
+                          backgroundColor: isFeed
+                            ? '#FFDBCA'
+                            : item.category === 'water'
+                            ? '#CCE5FF'
+                            : '#E8F5E9',
+                        },
+                      ]}>
+                      <MaterialIcons
+                        name={
+                          isFeed
+                            ? 'inventory-2'
+                            : item.category === 'water'
+                            ? 'science'
+                            : 'medication'
+                        }
+                        size={20}
+                        color={
+                          isFeed
+                            ? '#9D4300'
+                            : item.category === 'water'
+                            ? '#006398'
+                            : '#006E2D'
+                        }
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.itemName, { color: colors.onSurface }]}>
+                        {item.name}
+                      </Text>
+                      <Text style={styles.itemSpec}>{item.spec}</Text>
+                      <Text style={styles.itemSub}>{item.subtitle}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.itemCardRight}>
+                    <View
+                      style={[
+                        styles.stockBadge,
+                        { backgroundColor: isLow ? '#FFDAD6' : '#E8F5E9' },
+                      ]}>
+                      <Text
+                        style={[
+                          styles.stockBadgeText,
+                          { color: isLow ? '#BA1A1A' : '#006E2D' },
+                        ]}>
+                        {isLow ? 'SẮP HẾT' : 'ĐỦ DÙNG'}
+                      </Text>
+                    </View>
+                    <Text style={[styles.stockCountVal, { color: colors.onSurface }]}>
+                      {item.stockCount}{' '}
+                      <Text style={{ fontSize: 11, fontWeight: '600' }}>{item.unit}</Text>
+                    </Text>
+                    {item.totalKgOrL !== undefined && (
+                      <Text style={styles.stockTotalVal}>{item.totalKgOrL} kg</Text>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
           </View>
         </View>
       )}
+        </View>
+      </ScrollView>
+
+      {/* ==================================================== */}
+      {/* MODAL: CHỈNH SỬA HỒ SƠ (PATCH /auth/profile)          */}
+      {/* ==================================================== */}
+      <Modal
+        visible={showEditProfileModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowEditProfileModal(false)}>
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setShowEditProfileModal(false)}>
+          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderTitleGroup}>
+                <MaterialIcons name="person" size={24} color="#EA580C" />
+                <Text style={styles.modalHeading}>CẬP NHẬT THÔNG TIN CÁ NHÂN</Text>
+              </View>
+              <Pressable
+                onPress={() => setShowEditProfileModal(false)}
+                style={{ padding: 4 }}>
+                <MaterialIcons name="close" size={22} color="#8C7164" />
+              </Pressable>
+            </View>
+
+            {/* Input 1: Full Name */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>HỌ VÀ TÊN *</Text>
+              <TextInput
+                style={styles.textInput}
+                value={editFullName}
+                onChangeText={(val) => {
+                  setEditFullName(val);
+                  setEditProfileError(null);
+                }}
+                placeholder="Nhập họ và tên..."
+                placeholderTextColor="#8C7164"
+              />
+            </View>
+
+            {/* Input 2: Phone Number */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>SỐ ĐIỆN THOẠI LIÊN HỆ *</Text>
+              <TextInput
+                style={styles.textInput}
+                value={editPhoneNumber}
+                onChangeText={(val) => {
+                  setEditPhoneNumber(val);
+                  setEditProfileError(null);
+                }}
+                keyboardType="phone-pad"
+                placeholder="Ví dụ: 0912345678"
+                placeholderTextColor="#8C7164"
+              />
+            </View>
+
+            {/* Field 3: Email (Readonly / Fixed) */}
+            <View style={styles.inputGroup}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={styles.inputLabel}>ĐỊA CHỈ EMAIL</Text>
+                <View style={styles.lockedBadge}>
+                  <MaterialIcons name="lock" size={12} color="#8C7164" />
+                  <Text style={styles.lockedBadgeText}>Cố định</Text>
+                </View>
+              </View>
+              <View style={styles.disabledInputRow}>
+                <MaterialIcons name="mail-outline" size={18} color="#8C7164" />
+                <Text style={styles.disabledInputText}>{user?.email || 'Chưa cập nhật'}</Text>
+              </View>
+              <Text style={styles.fieldNoteText}>
+                * Email dùng làm định danh đăng nhập & nhận mã OTP bảo mật.
+              </Text>
+            </View>
+
+            {/* Field 4: Role (Readonly) */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>VAI TRÒ TRANG TRẠI</Text>
+              <View style={styles.disabledInputRow}>
+                <MaterialIcons name="badge" size={18} color="#006E2D" />
+                <Text style={[styles.disabledInputText, { color: '#006E2D', fontWeight: '800' }]}>
+                  {getRoleLabel(user?.role)}
+                </Text>
+              </View>
+            </View>
+
+            {/* Error Message */}
+            {editProfileError && (
+              <View style={styles.errorRow}>
+                <MaterialIcons name="error-outline" size={16} color="#BA1A1A" />
+                <Text style={styles.errorText}>{editProfileError}</Text>
+              </View>
+            )}
+
+            {/* Modal Actions */}
+            <View style={styles.modalActions}>
+              <Pressable
+                style={styles.btnCancel}
+                onPress={() => setShowEditProfileModal(false)}>
+                <Text style={styles.btnCancelText}>HỦY</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.btnConfirmChange, isSavingProfile && { opacity: 0.7 }]}
+                disabled={isSavingProfile}
+                onPress={handleSaveProfile}>
+                {isSavingProfile ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.btnConfirmChangeText}>LƯU THAY ĐỔI</Text>
+                )}
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ==================================================== */}
+      {/* MODAL: ĐỔI MẬT KHẨU (PATCH /auth/change-password)     */}
+      {/* ==================================================== */}
+      <Modal
+        visible={showChangePassModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowChangePassModal(false)}>
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setShowChangePassModal(false)}>
+          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderTitleGroup}>
+                <MaterialIcons name="lock" size={24} color="#EA580C" />
+                <Text style={styles.modalHeading}>ĐỔI MẬT KHẨU KỸ SƯ</Text>
+              </View>
+              <Pressable
+                onPress={() => setShowChangePassModal(false)}
+                style={{ padding: 4 }}>
+                <MaterialIcons name="close" size={22} color="#8C7164" />
+              </Pressable>
+            </View>
+
+            {/* Input 1: Current Password */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>MẬT KHẨU HIỆN TẠI *</Text>
+              <View style={styles.passInputRow}>
+                <TextInput
+                  style={styles.passInputField}
+                  value={currentPassword}
+                  onChangeText={(val) => {
+                    setCurrentPassword(val);
+                    setChangePassError(null);
+                  }}
+                  secureTextEntry={!showCurrentPass}
+                  placeholder="Nhập mật khẩu đang dùng..."
+                  placeholderTextColor="#8C7164"
+                />
+                <Pressable
+                  onPress={() => setShowCurrentPass(!showCurrentPass)}
+                  style={{ padding: 6 }}>
+                  <MaterialIcons
+                    name={showCurrentPass ? 'visibility-off' : 'visibility'}
+                    size={20}
+                    color="#8C7164"
+                  />
+                </Pressable>
+              </View>
+            </View>
+
+            {/* Input 2: New Password */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>MẬT KHẨU MỚI (TỐI THIỂU 8 KÝ TỰ) *</Text>
+              <View style={styles.passInputRow}>
+                <TextInput
+                  style={styles.passInputField}
+                  value={newPassword}
+                  onChangeText={(val) => {
+                    setNewPassword(val);
+                    setChangePassError(null);
+                  }}
+                  secureTextEntry={!showNewPass}
+                  placeholder="Nhập mật khẩu mới..."
+                  placeholderTextColor="#8C7164"
+                />
+                <Pressable
+                  onPress={() => setShowNewPass(!showNewPass)}
+                  style={{ padding: 6 }}>
+                  <MaterialIcons
+                    name={showNewPass ? 'visibility-off' : 'visibility'}
+                    size={20}
+                    color="#8C7164"
+                  />
+                </Pressable>
+              </View>
+            </View>
+
+            {/* Input 3: Confirm New Password */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>XÁC NHẬN MẬT KHẨU MỚI *</Text>
+              <View style={styles.passInputRow}>
+                <TextInput
+                  style={styles.passInputField}
+                  value={confirmNewPassword}
+                  onChangeText={(val) => {
+                    setConfirmNewPassword(val);
+                    setChangePassError(null);
+                  }}
+                  secureTextEntry={!showConfirmNewPass}
+                  placeholder="Nhập lại mật khẩu mới..."
+                  placeholderTextColor="#8C7164"
+                />
+                <Pressable
+                  onPress={() => setShowConfirmNewPass(!showConfirmNewPass)}
+                  style={{ padding: 6 }}>
+                  <MaterialIcons
+                    name={showConfirmNewPass ? 'visibility-off' : 'visibility'}
+                    size={20}
+                    color="#8C7164"
+                  />
+                </Pressable>
+              </View>
+            </View>
+
+            {/* Error Banner */}
+            {changePassError && (
+              <View style={styles.errorRow}>
+                <MaterialIcons name="error-outline" size={18} color="#BA1A1A" />
+                <Text style={styles.errorText}>{changePassError}</Text>
+              </View>
+            )}
+
+            {/* Modal Actions */}
+            <View style={styles.modalActions}>
+              <Pressable
+                onPress={() => setShowChangePassModal(false)}
+                style={styles.btnCancel}>
+                <Text style={styles.btnCancelText}>Hủy</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={handleChangePassword}
+                disabled={isChangingPass}
+                style={({ pressed }) => [
+                  styles.btnConfirmChange,
+                  { opacity: pressed || isChangingPass ? 0.85 : 1 },
+                ]}>
+                {isChangingPass ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.btnConfirmChangeText}>CẬP NHẬT</Text>
+                )}
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Modal: Thêm Vật Tư Mới */}
+      <Modal
+        visible={showAddModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowAddModal(false)}>
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setShowAddModal(false)}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalHeading}>NHẬP VẬT TƯ MỚI VÀO KHO</Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Tên vật tư / nhãn hiệu:</Text>
+              <TextInput
+                style={styles.textInput}
+                value={newName}
+                onChangeText={setNewName}
+                placeholder="Ví dụ: Cám số 3 Grobest"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Quy cách đóng gói:</Text>
+              <TextInput
+                style={styles.textInput}
+                value={newSpec}
+                onChangeText={setNewSpec}
+                placeholder="Ví dụ: Bao 25kg"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Số lượng nhập kho:</Text>
+              <TextInput
+                style={styles.textInput}
+                keyboardType="numeric"
+                value={newCount}
+                onChangeText={setNewCount}
+                placeholder="Ví dụ: 20"
+              />
+            </View>
+
+            <View style={styles.modalActions}>
+              <Pressable
+                onPress={() => setShowAddModal(false)}
+                style={styles.btnCancel}>
+                <Text style={styles.btnCancelText}>Hủy</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleAddNewItem}
+                style={styles.btnConfirm}>
+                <Text style={styles.btnConfirmText}>Lưu Kho</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -576,552 +1064,625 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 24,
+    paddingTop: 16,
+    paddingBottom: 40,
   },
   container: {
-    maxWidth: 550,
+    maxWidth: 500,
     width: '100%',
     alignSelf: 'center',
     gap: 14,
   },
-  contextCard: {
-    padding: 12,
-    borderRadius: 14,
-    borderWidth: 1,
+  filterTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
   },
-  contextHeader: {
+  chipsScroll: {
+    gap: 8,
+    paddingRight: 8,
+  },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#EFF4FF',
+    elevation: 1,
+  },
+  filterChipActive: {
+    backgroundColor: '#FFDBCA',
+    borderWidth: 1.5,
+    borderColor: '#F97316',
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#584237',
+  },
+  filterChipTextActive: {
+    color: '#9D4300',
+    fontWeight: '900',
+  },
+  btnAddSupply: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#F97316',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 2,
+  },
+  searchBar: {
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  dispenseCard: {
+    padding: 16,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    gap: 12,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+  },
+  dispenseHeader: {
+    flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  contextTitleGroup: {
+  dispenseBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    flex: 1,
-  },
-  contextSelectorBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    flex: 1,
-  },
-  contextPondName: {
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  agePill: {
+    gap: 4,
+    backgroundColor: '#FFDBCA',
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 999,
+    borderRadius: 6,
   },
-  agePillText: {
+  dispenseBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#9D4300',
+  },
+  hopperStatusText: {
     fontSize: 11,
-    fontWeight: '800',
+    color: '#584237',
+    fontWeight: '600',
   },
-  syncBar: {
+  dispenseBody: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  feedIconSquare: {
+    width: 46,
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: '#FFDBCA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dispenseTitle: {
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  dispenseSub: {
+    fontSize: 12,
+    color: '#584237',
+    marginTop: 1,
+  },
+  dispenseStock: {
+    fontSize: 11,
+    color: '#584237',
+    marginTop: 2,
+  },
+  btnQuickDispense: {
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#F97316',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  btnQuickDispenseText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  sectionTitleRow: {
+    marginTop: 4,
+  },
+  sectionHeading: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.3,
+  },
+  inventoryList: {
+    gap: 10,
+  },
+  itemCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 8,
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
   },
-  syncBarLeft: {
+  itemCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  categoryIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  itemName: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  itemSpec: {
+    fontSize: 11,
+    color: '#584237',
+    marginTop: 1,
+  },
+  itemSub: {
+    fontSize: 10,
+    color: '#8C7164',
+    marginTop: 1,
+  },
+  itemCardRight: {
+    alignItems: 'flex-end',
+    gap: 2,
+  },
+  stockBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  stockBadgeText: {
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  stockCountVal: {
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  stockTotalVal: {
+    fontSize: 10,
+    color: '#8C7164',
+    fontWeight: '600',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 20,
+    gap: 12,
+  },
+  modalHeading: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#0B1C30',
+  },
+  inputGroup: {
+    gap: 4,
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0B1C30',
+  },
+  textInput: {
+    height: 48,
+    borderWidth: 1.5,
+    borderColor: '#E0C0B1',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    backgroundColor: '#EFF4FF',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+  },
+  btnCancel: {
+    flex: 1,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#EFF4FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnCancelText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#584237',
+  },
+  btnConfirm: {
+    flex: 1,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#F97316',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnConfirmText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  segmentWrapper: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  segmentContainer: {
+    flexDirection: 'row',
+    borderRadius: 14,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: '#D0D8E8',
+  },
+  segmentBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  segmentBtnActive: {
+    backgroundColor: '#FFFFFF',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  segmentBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#8C7164',
+  },
+  segmentBtnTextActive: {
+    color: '#EA580C',
+    fontWeight: '900',
+  },
+  accountSection: {
+    gap: 14,
+  },
+  profileCard: {
+    padding: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+  },
+  profileHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  profileAvatarBox: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#FFE8D6',
+    borderWidth: 1.5,
+    borderColor: '#EA580C',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileName: {
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  roleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    backgroundColor: '#DDF5E5',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginTop: 4,
+  },
+  roleBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#006E2D',
+  },
+  profileGrid: {
+    borderRadius: 14,
+    padding: 12,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#E0E8F5',
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  detailLabelGroup: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  detailLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#584237',
+  },
+  detailValue: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#DDF5E5',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
   },
   statusDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
+    backgroundColor: '#006E2D',
   },
-  syncStatusText: {
+  statusPillText: {
     fontSize: 11,
     fontWeight: '800',
+    color: '#006E2D',
   },
-  syncDesc: {
-    fontSize: 11,
-    fontWeight: '600',
+  btnIconSync: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EFF4FF',
   },
-  targetBento: {
-    padding: 14,
-    borderRadius: 16,
+  securityCard: {
+    padding: 16,
+    borderRadius: 20,
     borderWidth: 1,
     gap: 10,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
   },
-  bentoHeader: {
+  cardTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  bentoTitleGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  bentoTitle: {
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  schedulePill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-  },
-  schedulePillText: {
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  bentoGrid: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 2,
-  },
-  bentoBox: {
-    flex: 1,
-    padding: 10,
-    borderRadius: 12,
-    minHeight: 88,
-    justifyContent: 'space-between',
-  },
-  bentoBoxTag: {
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
-  numRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 3,
-  },
-  bentoBoxNum: {
-    fontSize: 28,
-    fontWeight: '900',
-  },
-  bentoBoxUnit: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  bentoBoxSub: {
-    fontSize: 9,
-    fontWeight: '600',
-  },
-  bentoProgressRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  bentoProgressText: {
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  bentoProgressVal: {
-    fontSize: 10,
-    fontWeight: '900',
-  },
-  progressTrack: {
-    height: 8,
-    borderRadius: 999,
-    overflow: 'hidden',
-  },
-  progressIndicator: {
-    height: '100%',
-    borderRadius: 999,
-  },
-  aiPill: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    padding: 10,
-    borderRadius: 12,
-  },
-  aiIconBox: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
-  aiTitle: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  aiDesc: {
-    fontSize: 11,
-    lineHeight: 15,
-    marginTop: 2,
-  },
-  rebalanceBtn: {
-    height: 44,
-    borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     gap: 8,
   },
-  rebalanceBtnText: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  sessionsHeadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 4,
-  },
-  sessionsHeadingLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  sessionsHeadingTitle: {
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  sessionsHeadingSub: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  sessionCard: {
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: 1,
-    gap: 10,
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  runningBorder: {
-    borderWidth: 1.5,
-  },
-  runningTopStrip: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 4,
-  },
-  sessionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sessionHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  sessionIconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sessionName: {
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  sessionSub: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-  statusBadgeText: {
-    fontSize: 9,
+  cardTitleText: {
+    fontSize: 13,
     fontWeight: '900',
     letterSpacing: 0.3,
   },
-  sessionInfoGrid: {
-    flexDirection: 'row',
-    padding: 10,
-    borderRadius: 10,
-  },
-  sessionMetaLabel: {
-    fontSize: 9,
-    fontWeight: '800',
-  },
-  sessionMetaVal: {
-    fontSize: 12,
-    fontWeight: '800',
-    marginTop: 1,
-  },
-  sessionNoteRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  sessionNoteText: {
+  cardDescText: {
     fontSize: 11,
-    fontWeight: '700',
+    color: '#8C7164',
+    lineHeight: 16,
   },
-  runningDetailBox: {
-    padding: 10,
-    borderRadius: 10,
-    gap: 6,
-  },
-  runningProgressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-  },
-  runningProgressLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  runningProgressVal: {
-    fontSize: 18,
-    fontWeight: '900',
-  },
-  runningTimeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  runningTimeText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  runningActionRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  btnHalfAction: {
-    flex: 1,
-    height: 44,
-    borderRadius: 10,
+  btnOpenChangePass: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-  },
-  btnHalfText: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  stepperContainer: {
-    padding: 10,
-    borderRadius: 12,
     gap: 8,
-  },
-  stepperHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  stepperHeaderTag: {
-    fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 0.3,
-  },
-  tipPill: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  tipPillText: {
-    fontSize: 9,
-    fontWeight: '800',
-  },
-  stepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  stepBtn: {
-    width: 60,
     height: 46,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: 12,
+    backgroundColor: '#EA580C',
+    marginTop: 4,
+    elevation: 2,
   },
-  stepBtnText: {
+  btnOpenChangePassText: {
     fontSize: 13,
     fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
   },
-  stepNumCol: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
+  farmInfoCard: {
+    padding: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 10,
   },
-  stepBigNum: {
-    fontSize: 28,
-    fontWeight: '900',
+  farmDetailsGrid: {
+    gap: 8,
   },
-  stepBigUnit: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  stepDuration: {
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  tempoRow: {
+  farmRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingVertical: 2,
   },
-  tempoLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  tempoText: {
-    fontSize: 11,
+  farmLabel: {
+    fontSize: 12,
     fontWeight: '600',
+    color: '#584237',
   },
-  tempoBtnText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  interlockAlert: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 10,
-    borderRadius: 8,
-  },
-  interlockAlertText: {
-    flex: 1,
-    fontSize: 10,
-    lineHeight: 14,
+  farmVal: {
+    fontSize: 12,
     fontWeight: '700',
+    color: '#0B1C30',
   },
-  addSessionBtn: {
-    height: 52,
-    borderRadius: 14,
+  btnLogout: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: 'rgba(2,132,199,0.4)',
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#FFEDEC',
+    borderWidth: 1.5,
+    borderColor: '#F8B4B4',
+    marginTop: 6,
   },
-  addCircle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addSessionText: {
-    fontSize: 11,
+  btnLogoutText: {
+    fontSize: 13,
     fontWeight: '900',
+    color: '#BA1A1A',
     letterSpacing: 0.5,
   },
-  safetyCard: {
-    padding: 12,
-    borderRadius: 14,
-    gap: 6,
-  },
-  safetyHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  safetyTitle: {
+  versionText: {
+    textAlign: 'center',
     fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  safetyDesc: {
-    fontSize: 11,
-    lineHeight: 15,
-  },
-  safetyGrid: {
-    flexDirection: 'row',
-    gap: 8,
+    color: '#8C7164',
     marginTop: 4,
   },
-  safetyBox: {
-    flex: 1,
+  suppliesSection: {
+    gap: 14,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  modalHeaderTitleGroup: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  passInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 48,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#D0D8E8',
+    paddingHorizontal: 12,
+    backgroundColor: '#EFF4FF',
+  },
+  passInputField: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0B1C30',
+  },
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     padding: 8,
     borderRadius: 8,
+    backgroundColor: '#FFEDEC',
+    borderWidth: 1,
+    borderColor: '#F8B4B4',
   },
-  safetyBoxLabel: {
-    fontSize: 9,
+  errorText: {
+    flex: 1,
+    fontSize: 11,
     fontWeight: '700',
+    color: '#BA1A1A',
   },
-  safetyBoxVal: {
-    fontSize: 12,
-    fontWeight: '900',
-    marginTop: 1,
-  },
-  saveSection: {
-    gap: 6,
-    paddingTop: 4,
-  },
-  saveBtn: {
-    height: 54,
-    borderRadius: 14,
-    flexDirection: 'row',
+  btnConfirmChange: {
+    flex: 1,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#006E2D',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 4,
-    elevation: 3,
   },
-  saveBtnText: {
-    color: '#FFFFFF',
+  btnConfirmChangeText: {
     fontSize: 13,
     fontWeight: '900',
-    letterSpacing: 0.5,
+    color: '#FFFFFF',
   },
-  rtcSubRow: {
+  btnEditProfile: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingHorizontal: 8,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: '#FFE8D6',
+    borderWidth: 1.5,
+    borderColor: '#F97316' + '60',
   },
-  rtcSubText: {
+  btnEditProfileText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#EA580C',
+    letterSpacing: 0.3,
+  },
+  lockedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#E5E7EB',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  lockedBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#4B5563',
+  },
+  disabledInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    height: 48,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#D1D5DB',
+    paddingHorizontal: 12,
+    backgroundColor: '#F3F4F6',
+  },
+  disabledInputText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4B5563',
+  },
+  fieldNoteText: {
     fontSize: 10,
     fontWeight: '600',
-    textAlign: 'center',
-    flex: 1,
-  },
-  toastContainer: {
-    position: 'absolute',
-    bottom: 24,
-    left: 16,
-    right: 16,
-    padding: 14,
-    borderRadius: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 6,
-    zIndex: 100,
-  },
-  toastTitle: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  toastSub: {
-    fontSize: 11,
-    marginTop: 1,
+    color: '#8C7164',
+    marginTop: 2,
   },
 });

@@ -24,8 +24,14 @@ export default function AppTabs() {
           <TabTrigger name="home" href="/" asChild>
             <TabButton>Trang chủ</TabButton>
           </TabTrigger>
-          <TabTrigger name="explore" href="/explore" asChild>
-            <TabButton>Thiết bị & Cảnh báo</TabButton>
+          <TabTrigger name="quan-ly-ao" href="/quan-ly-ao" asChild>
+            <TabButton>Quản lý ao</TabButton>
+          </TabTrigger>
+          <TabTrigger name="may-cho-an" href="/may-cho-an" asChild>
+            <TabButton>Máy cho ăn</TabButton>
+          </TabTrigger>
+          <TabTrigger name="cai-dat" href="/cai-dat" asChild>
+            <TabButton>Lịch cữ</TabButton>
           </TabTrigger>
         </CustomTabList>
       </TabList>

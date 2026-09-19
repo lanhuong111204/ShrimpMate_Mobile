@@ -34,26 +34,12 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Trang Chủ',
+          title: 'Lịch Cữ',
           tabBarIcon: ({ color, focused }) => (
             <MaterialIcons
-              name="home"
+              name="menu-book"
               size={24}
-              color={color}
-              style={focused ? { transform: [{ scale: 1.1 }] } : {}}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="quan-ly-ao"
-        options={{
-          title: 'Quản Lý Ao',
-          tabBarIcon: ({ color, focused }) => (
-            <MaterialIcons
-              name="waves"
-              size={24}
-              color={color}
+              color={focused ? '#F97316' : color}
               style={focused ? { transform: [{ scale: 1.1 }] } : {}}
             />
           ),
@@ -62,12 +48,26 @@ export default function TabLayout() {
       <Tabs.Screen
         name="may-cho-an"
         options={{
-          title: 'Máy Cho Ăn',
+          title: 'Trạm Ăn',
           tabBarIcon: ({ color, focused }) => (
             <MaterialIcons
-              name="precision-manufacturing"
+              name="radar"
               size={24}
-              color={color}
+              color={focused ? '#F97316' : color}
+              style={focused ? { transform: [{ scale: 1.1 }] } : {}}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="quan-ly-ao"
+        options={{
+          title: 'Giám Sát',
+          tabBarIcon: ({ color, focused }) => (
+            <MaterialIcons
+              name="waves"
+              size={24}
+              color={focused ? '#F97316' : color}
               style={focused ? { transform: [{ scale: 1.1 }] } : {}}
             />
           ),
@@ -76,12 +76,12 @@ export default function TabLayout() {
       <Tabs.Screen
         name="cai-dat"
         options={{
-          title: 'Lịch Cữ',
+          title: 'Cài Đặt',
           tabBarIcon: ({ color, focused }) => (
             <MaterialIcons
-              name="schedule"
+              name="settings"
               size={24}
-              color={color}
+              color={focused ? '#F97316' : color}
               style={focused ? { transform: [{ scale: 1.1 }] } : {}}
             />
           ),

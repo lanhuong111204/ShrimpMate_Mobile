@@ -5,582 +5,379 @@ import {
   View,
   ScrollView,
   Pressable,
+  Modal,
+  TextInput,
   Alert,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/use-theme';
 import { AppHeader } from '@/components/common/app-header';
+import { useFarm } from '@/context/farm-context';
 
-export default function ScreenHome() {
+export default function ScreenFeedingLog() {
   const colors = useTheme();
   const router = useRouter();
+  const { farmInfo, feedMeals, updateFeedMeal, addExtraMeal } = useFarm();
 
-  const [ao2Running, setAo2Running] = useState(true);
-  const [ao3Refilled, setAo3Refilled] = useState(false);
+  const [showExtraModal, setShowExtraModal] = useState(false);
+  const [extraKg, setExtraKg] = useState('5');
+  const [extraNote, setExtraNote] = useState('Cữ chiều bổ sung men tiêu hóa');
 
-  const handleEmergencyStopAll = () => {
-    Alert.alert(
-      'CẢNH BÁO KHẨN CẤP',
-      'Bạn có chắc chắn muốn ngắt điện toàn bộ 5 máy cho ăn ngay lập tức không? Tôm sẽ dừng rải cám ngay.',
-      [
-        { text: 'Hủy', style: 'cancel' },
-        {
-          text: 'NGẮT ĐIỆN NGAY',
-          style: 'destructive',
-          onPress: () => {
-            setAo2Running(false);
-            Alert.alert(
-              'ĐÃ NGẮT NGUỒN AN TOÀN',
-              'Đã ngắt nguồn toàn bộ máy cho ăn. Đèn hiệu bờ ao đã chuyển sang màu đỏ an toàn.'
-            );
-          },
-        },
-      ]
-    );
+  // Meal 3 (Chiều)
+  const meal3 = feedMeals.find((m) => m.id === 'meal-3');
+
+  // Summary computations
+  const totalTargetKg = feedMeals.reduce((acc, m) => acc + m.targetKg, 0);
+  const totalDispensedKg = feedMeals.reduce((acc, m) => acc + m.dispensedKg, 0);
+  const remainingKg = Math.max(0, totalTargetKg - totalDispensedKg);
+  const overallPercent = totalTargetKg > 0 ? Math.round((totalDispensedKg / totalTargetKg) * 100) : 0;
+
+  const handleAiAccept = () => {
+    updateFeedMeal('meal-3', {
+      targetKg: 22.0,
+      isAiAccepted: true,
+      notes: 'Đã áp dụng khuyến nghị AI: giảm xuống 22kg để bảo vệ đáy ao',
+    });
+    Alert.alert('Đã Áp Dụng Đề Xuất AI', 'Cữ chiều đã giảm xuống 22 kg để bảo vệ đáy ao.');
   };
 
-  const handleNotificationPress = () => {
-    Alert.alert(
-      'Thông Báo Hệ Thống',
-      '• Ao 2: Máy đang phun cữ trưa (tiến độ 72%)\n• Ao 3: Cảnh báo mực cám sắp hết (< 5 kg)\n• Trại Bạc Liêu: Cảm biến hoạt động ổn định'
-    );
+  const handleAiKeep = () => {
+    updateFeedMeal('meal-3', {
+      targetKg: 25.0,
+      isAiAccepted: false,
+      notes: 'Đã giữ nguyên 25kg theo ý định của chủ đầm',
+    });
+    Alert.alert('Giữ Nguyên Khẩu Phần', 'Đã lưu khẩu phần 25 kg theo quyết định của chủ đầm.');
+  };
+
+  const handleSaveExtraMeal = () => {
+    const parsedKg = parseFloat(extraKg);
+    if (isNaN(parsedKg) || parsedKg <= 0) {
+      Alert.alert('Lỗi', 'Vui lòng nhập số kg hợp lệ');
+      return;
+    }
+    addExtraMeal(parsedKg, extraNote);
+    setShowExtraModal(false);
   };
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.surface }]}>
-      <AppHeader title="Khu Nuôi Bạc Liêu A" />
+      <AppHeader subtitle="Lịch Cữ Nuôi Tôm" />
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}>
         <View style={styles.container}>
-          {/* Status & Context Header Card */}
-          <View
+          {/* Pond Quick Status Strip */}
+          <Pressable
+            onPress={() => router.push('/(tabs)/may-cho-an')}
             style={[
-              styles.contextCard,
-              { backgroundColor: colors.surfaceContainer, borderColor: colors.outlineVariant + '30' },
+              styles.pondStrip,
+              { backgroundColor: colors.surfaceContainerLowest, borderColor: colors.outlineVariant + '40' },
             ]}>
-            <View style={styles.contextLeft}>
-              <View style={styles.contextTitleRow}>
-                <MaterialIcons name="water" size={20} color={colors.primary} />
-                <Text style={[styles.contextTitle, { color: colors.onSurface }]}>
-                  Trại Tôm Ba Đầm
-                </Text>
+            <View style={styles.pondStripLeft}>
+              <View style={[styles.pondIconBox, { backgroundColor: '#FFDBCA' }]}>
+                <MaterialIcons name="water" size={22} color="#9D4300" />
               </View>
-
-              <View style={styles.contextMetaRow}>
-                <View style={[styles.activePondsPill, { backgroundColor: colors.surfaceContainerHigh }]}>
-                  <Text style={[styles.activePondsText, { color: colors.primary }]}>5 Ao đang nuôi</Text>
+              <View style={{ flex: 1 }}>
+                <View style={styles.pondNameRow}>
+                  <Text style={[styles.pondNameText, { color: colors.onSurface }]}>
+                    {farmInfo.selectedPond}
+                  </Text>
+                  <MaterialIcons name="arrow-forward-ios" size={13} color={colors.onSurfaceVariant} />
                 </View>
-                <Text style={{ color: colors.outline }}>•</Text>
-                <View style={styles.weatherItem}>
-                  <MaterialIcons name="wb-sunny" size={14} color={colors.tertiaryContainer} />
-                  <Text style={[styles.metaText, { color: colors.onSurfaceVariant }]}>Nắng ráo 31°C</Text>
-                </View>
-                <Text style={{ color: colors.outline }}>•</Text>
-                <View style={styles.weatherItem}>
-                  <MaterialIcons name="water-drop" size={14} color={colors.primary} />
-                  <Text style={[styles.metaText, { color: colors.onSurfaceVariant }]}>Nước lớn 15:30</Text>
-                </View>
+                <Text style={[styles.pondSubText, { color: colors.secondary }]}>
+                  Tôm thẻ chân trắng • 42 ngày tuổi
+                </Text>
               </View>
             </View>
 
-            <Pressable
-              onPress={handleNotificationPress}
-              style={({ pressed }) => [
-                styles.notiBtn,
-                { backgroundColor: colors.surfaceContainerLowest, opacity: pressed ? 0.85 : 1 },
+            <View style={styles.weatherBox}>
+              <Text style={styles.weatherLabel}>Nhiệt độ nước</Text>
+              <View style={styles.tempRow}>
+                <MaterialIcons name="wb-sunny" size={16} color="#F97316" />
+                <Text style={styles.tempVal}>{farmInfo.waterTemp}°C</Text>
+              </View>
+            </View>
+          </Pressable>
+
+          {/* Hero Card: Khẩu phần hôm nay */}
+          <View
+            style={[
+              styles.heroCard,
+              { backgroundColor: colors.surfaceContainerLowest, borderColor: colors.outlineVariant + '40' },
+            ]}>
+            <View style={styles.heroHeader}>
+              <View style={styles.heroTitleRow}>
+                <MaterialIcons name="analytics" size={22} color="#F97316" />
+                <Text style={[styles.heroTitle, { color: colors.onSurface }]}>
+                  Khẩu Phần Hôm Nay
+                </Text>
+              </View>
+              <View style={[styles.badgePill, { backgroundColor: colors.secondaryContainer }]}>
+                <View style={[styles.dot, { backgroundColor: colors.secondary }]} />
+                <Text style={[styles.badgeText, { color: colors.onSecondaryContainer }]}>
+                  4 Cữ Chuẩn
+                </Text>
+              </View>
+            </View>
+
+            {/* Metric 3-Column Split */}
+            <View style={[styles.metricGrid, { backgroundColor: colors.surfaceContainerLow }]}>
+              <View style={[styles.metricCol, { backgroundColor: colors.surfaceContainerLowest }]}>
+                <Text style={styles.colLabel}>Tổng lượng</Text>
+                <Text style={styles.colVal}>{totalTargetKg}</Text>
+                <Text style={styles.colUnit}>kg cám</Text>
+              </View>
+              <View style={[styles.metricCol, { backgroundColor: colors.surfaceContainerLowest }]}>
+                <Text style={[styles.colLabel, { color: colors.secondary }]}>Đã rải</Text>
+                <Text style={[styles.colVal, { color: colors.secondary }]}>
+                  {totalDispensedKg.toFixed(1)}
+                </Text>
+                <Text style={styles.colUnit}>kg cám</Text>
+              </View>
+              <View style={[styles.metricCol, { backgroundColor: colors.surfaceContainerLowest }]}>
+                <Text style={[styles.colLabel, { color: '#F97316' }]}>Còn lại</Text>
+                <Text style={[styles.colVal, { color: '#F97316' }]}>
+                  {remainingKg.toFixed(1)}
+                </Text>
+                <Text style={styles.colUnit}>kg cám</Text>
+              </View>
+            </View>
+
+            {/* Progress Bar */}
+            <View style={styles.progressSection}>
+              <View style={styles.progressLabels}>
+                <Text style={styles.progressPercentText}>{overallPercent}% khẩu phần</Text>
+                <Text style={styles.progressSubText}>
+                  Còn {feedMeals.filter((m) => m.status === 'pending' || m.status === 'ai_suggested').length} cữ nữa
+                </Text>
+              </View>
+              <View style={[styles.progressBarTrack, { backgroundColor: colors.surfaceContainerHigh }]}>
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    { width: `${Math.min(100, overallPercent)}%`, backgroundColor: colors.secondary },
+                  ]}
+                />
+              </View>
+            </View>
+          </View>
+
+          {/* Gemini AI Adaptive Recommendation Card */}
+          {meal3 && (
+            <View
+              style={[
+                styles.aiCard,
+                {
+                  backgroundColor:
+                    meal3.isAiAccepted === true
+                      ? '#E8F5E9'
+                      : meal3.isAiAccepted === false
+                      ? '#FFF3E0'
+                      : '#FFF8F5',
+                  borderColor: meal3.isAiAccepted === true ? '#7CF994' : '#F97316',
+                },
               ]}>
-              <MaterialIcons name="notifications" size={24} color={colors.onSurface} />
-              <View style={[styles.notiDot, { backgroundColor: colors.error }]} />
+              <View style={styles.aiHeader}>
+                <View style={styles.aiBadgeGroup}>
+                  <MaterialIcons name="auto-awesome" size={20} color="#F97316" />
+                  <Text style={styles.aiBadgeTitle}>GỢI Ý GEMINI AI TỐI ƯU CỮ CHIỀU</Text>
+                </View>
+                <View style={styles.aiStatusBadge}>
+                  <Text style={styles.aiStatusText}>
+                    {meal3.isAiAccepted === true
+                      ? '✓ ĐÃ ÁP DỤNG'
+                      : meal3.isAiAccepted === false
+                      ? 'GIỮ NGUYÊN 25KG'
+                      : 'ĐỀ XUẤT MỚI'}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={styles.aiBodyText}>
+                Cắt giảm <Text style={{ fontWeight: '900', color: '#9D4300' }}>-3.0 kg</Text> (từ 25kg xuống còn{' '}
+                <Text style={{ fontWeight: '900', color: '#006E2D' }}>22.0 kg</Text>).
+              </Text>
+              <Text style={styles.aiReasonText}>
+                💡 Lý do: Đỉnh nắng 32°C trưa nay làm oxy hòa tan tầng đáy giảm còn 4.8 mg/L. Giảm lượng cám giúp tôm ăn sạch nhá, không bị đọng đáy gây khí độc NH3.
+              </Text>
+
+              {meal3.isAiAccepted === undefined && (
+                <View style={styles.aiActionsRow}>
+                  <Pressable
+                    onPress={handleAiAccept}
+                    style={({ pressed }) => [
+                      styles.btnAiAccept,
+                      { opacity: pressed ? 0.9 : 1 },
+                    ]}>
+                    <MaterialIcons name="check" size={18} color="#FFFFFF" />
+                    <Text style={styles.btnAiAcceptText}>Áp dụng (22 kg)</Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={handleAiKeep}
+                    style={({ pressed }) => [
+                      styles.btnAiKeep,
+                      { opacity: pressed ? 0.9 : 1 },
+                    ]}>
+                    <Text style={styles.btnAiKeepText}>Giữ nguyên 25 kg</Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Meal Timeline List */}
+          <View style={styles.sectionHeaderRow}>
+            <Text style={[styles.sectionTitle, { color: colors.onSurface }]}>
+              DANH SÁCH CỮ ĂN HÔM NAY
+            </Text>
+            <Pressable
+              onPress={() => setShowExtraModal(true)}
+              style={[styles.addMealBtn, { backgroundColor: '#FFDBCA' }]}>
+              <MaterialIcons name="add" size={16} color="#9D4300" />
+              <Text style={styles.addMealText}>Thêm Cữ Phụ</Text>
             </Pressable>
           </View>
 
-          {/* Hero Visual Photo */}
-          <View style={[styles.heroCard, { backgroundColor: colors.surfaceContainerHigh }]}>
-            <Image
-              source={{
-                uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCZ4bJfsx2Lj8XZy0-Twf_LEI2rfiJvzG4_HPHHN1QCUalsalkZkhHPqIpUEZT96vrJhPQRdqTZ9paZFZI3MGOrOb8cv_HlxoUWq7BBS1B5Y0u71EzwxzGEb_m5T1hDx_LGEOwlgmIi6WHibR528tIULEDLb7o5tUz5cYAlTI1xqhUBSprFMMMKAEAEQikJgFK_XTkCu_46jU-iv8sOV8nGb3EqrRrvaGrGYywW15sfLIo4BXJjGuOGGA',
-              }}
-              style={styles.heroImg}
-              contentFit="cover"
-            />
-            <View style={styles.heroOverlay}>
-              <View style={styles.heroOverlayContent}>
-                <View style={styles.heroStatus}>
-                  <View style={[styles.heroDot, { backgroundColor: colors.secondaryFixed }]} />
-                  <Text numberOfLines={1} style={styles.heroText}>
-                    Cảm biến tầng nước & Máy phun tự động hoạt động
-                  </Text>
-                </View>
-                <View style={[styles.iotBadge, { backgroundColor: colors.primary }]}>
-                  <Text style={styles.iotBadgeText}>IoT v4.2</Text>
-                </View>
-              </View>
-            </View>
-          </View>
+          <View style={styles.timelineList}>
+            {feedMeals.map((meal) => {
+              const isCompleted = meal.status === 'completed';
+              const isActive = meal.status === 'active';
+              const isAi = meal.status === 'ai_suggested';
 
-          {/* Today Summary Card */}
-          <View style={[styles.summaryCard, { backgroundColor: colors.primaryContainer }]}>
-            <View style={styles.summaryTopRow}>
-              <View style={styles.summaryTitleGroup}>
-                <View style={styles.summaryIconBox}>
-                  <MaterialIcons name="insights" size={22} color="#FFFFFF" />
-                </View>
-                <View>
-                  <Text style={styles.summaryTitle}>Tổng Quan Hôm Nay</Text>
-                  <Text style={styles.summarySub}>Cập nhật theo thời gian thực</Text>
-                </View>
-              </View>
-
-              <View style={[styles.liveBadge, { backgroundColor: colors.secondaryContainer }]}>
-                <View style={[styles.liveDot, { backgroundColor: colors.secondary }]} />
-                <Text style={[styles.liveText, { color: colors.onSecondaryContainer }]}>TRỰC TIẾP</Text>
-              </View>
-            </View>
-
-            <View style={styles.summaryGrid}>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryItemLabel}>Tổng cám đã rải</Text>
-                <View style={styles.summaryNumRow}>
-                  <Text style={styles.summaryItemVal}>320</Text>
-                  <Text style={styles.summaryItemUnit}>kg</Text>
-                </View>
-                <View style={styles.summaryItemTag}>
-                  <Text style={styles.summaryItemTagText}>~13 bao cám</Text>
-                </View>
-              </View>
-
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryItemLabel}>Tình trạng máy</Text>
-                <View style={styles.summaryNumRow}>
-                  <Text style={[styles.summaryItemVal, { color: colors.secondaryFixed }]}>
-                    {ao2Running ? '4' : '3'}
-                    <Text style={{ fontSize: 18, color: 'rgba(255,255,255,0.8)' }}>/5</Text>
-                  </Text>
-                  <Text style={[styles.summaryItemUnit, { color: colors.secondaryFixed }]}>Máy</Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <View style={[styles.liveDot, { backgroundColor: colors.secondaryFixed }]} />
-                  <Text style={[styles.summaryItemTagText, { color: colors.secondaryFixed }]}>
-                    Đang chạy cữ
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            {!ao3Refilled && (
-              <View style={[styles.warningBanner, { backgroundColor: colors.tertiaryContainer }]}>
-                <View style={styles.warningBannerLeft}>
-                  <MaterialIcons name="warning" size={20} color="#FFFFFF" />
-                  <Text numberOfLines={1} style={styles.warningBannerText}>
-                    <Text style={{ color: colors.tertiaryFixed, fontWeight: '800' }}>Ao 3:</Text> Cần nạp cám gấp (&lt; 5 kg)
-                  </Text>
-                </View>
-                <View style={[styles.warningBannerTime, { backgroundColor: colors.tertiary }]}>
-                  <Text style={styles.warningBannerTimeText}>TRƯỚC 14:00</Text>
-                </View>
-              </View>
-            )}
-          </View>
-
-          {/* Pond Section Title */}
-          <View style={styles.sectionHeaderRow}>
-            <View style={styles.sectionTitleLeft}>
-              <MaterialIcons name="grid-view" size={22} color={colors.primary} />
-              <Text style={[styles.sectionTitle, { color: colors.onSurface }]}>
-                Danh Sách Ao Nuôi
-              </Text>
-            </View>
-            <View style={[styles.pondCountPill, { backgroundColor: colors.surfaceContainer }]}>
-              <Text style={[styles.pondCountText, { color: colors.onSurfaceVariant }]}>
-                4 / 5 Đang chạy
-              </Text>
-            </View>
-          </View>
-
-          {/* Pond Cards List */}
-          <View style={styles.pondsList}>
-            {/* AO 1 */}
-            <View
-              style={[
-                styles.pondCard,
-                {
-                  backgroundColor: colors.surfaceContainerLowest,
-                  borderLeftColor: colors.secondary,
-                },
-              ]}>
-              <View style={styles.pondCardHeader}>
-                <View>
-                  <View style={styles.pondTitleGroup}>
-                    <Text style={[styles.pondName, { color: colors.onSurface }]}>AO 1</Text>
-                    <View style={[styles.statusPill, { backgroundColor: colors.secondaryContainer }]}>
-                      <MaterialIcons name="check-circle" size={13} color={colors.onSecondaryContainer} />
-                      <Text style={[styles.statusPillText, { color: colors.onSecondaryContainer }]}>TỐT</Text>
-                    </View>
-                  </View>
-                  <Text style={[styles.pondSub, { color: colors.onSurfaceVariant }]}>
-                    Tôm thẻ • 55 ngày tuổi
-                  </Text>
-                </View>
-
-                <View style={[styles.feedStatBox, { backgroundColor: colors.surfaceContainerLow }]}>
-                  <Text style={[styles.feedStatLabel, { color: colors.outline }]}>Đã ăn hôm nay</Text>
-                  <Text style={[styles.feedStatVal, { color: colors.primary }]}>
-                    85 <Text style={styles.feedStatUnit}>kg</Text>
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.metricsGrid}>
-                <View style={[styles.metricBox, { backgroundColor: colors.surfaceContainerLow }]}>
-                  <View style={styles.metricBoxLeft}>
-                    <View style={[styles.metricIconBox, { backgroundColor: colors.primaryFixed }]}>
-                      <MaterialIcons name="air" size={16} color={colors.primary} />
-                    </View>
-                    <View>
-                      <Text style={[styles.metricLabel, { color: colors.onSurfaceVariant }]}>Oxy (DO)</Text>
-                      <Text style={[styles.metricNumber, { color: colors.secondary }]}>
-                        5.2 <Text style={styles.metricSubUnit}>mg/L</Text>
-                      </Text>
-                    </View>
-                  </View>
-                  <MaterialIcons name="check" size={18} color={colors.secondary} />
-                </View>
-
-                <View style={[styles.metricBox, { backgroundColor: colors.surfaceContainerLow }]}>
-                  <View style={styles.metricBoxLeft}>
-                    <View style={[styles.metricIconBox, { backgroundColor: colors.secondaryContainer }]}>
-                      <MaterialIcons name="science" size={16} color={colors.secondary} />
-                    </View>
-                    <View>
-                      <Text style={[styles.metricLabel, { color: colors.onSurfaceVariant }]}>Độ pH</Text>
-                      <Text style={[styles.metricNumber, { color: colors.onSurface }]}>
-                        7.8 <Text style={styles.metricSubUnit}>pH</Text>
-                      </Text>
-                    </View>
-                  </View>
-                  <MaterialIcons name="check" size={18} color={colors.secondary} />
-                </View>
-              </View>
-
-              <View style={[styles.pondStatusFooter, { backgroundColor: colors.surfaceContainerLow }]}>
-                <View style={styles.pondStatusLeft}>
-                  <MaterialIcons name="pause-circle" size={18} color={colors.outline} />
-                  <Text style={[styles.pondStatusText, { color: colors.onSurface }]}>
-                    Máy Cho Ăn: Đang nghỉ
-                  </Text>
-                </View>
-                <View style={[styles.nextFeedBadge, { backgroundColor: colors.surfaceContainer }]}>
-                  <Text style={[styles.nextFeedText, { color: colors.onSurfaceVariant }]}>
-                    Cữ kế: 14:00
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            {/* AO 2 (Interactive Link to Detail) */}
-            <View
-              style={[
-                styles.pondCard,
-                {
-                  backgroundColor: colors.surfaceContainerLowest,
-                  borderLeftColor: colors.primary,
-                },
-              ]}>
-              <View style={styles.pondCardHeader}>
-                <View>
-                  <View style={styles.pondTitleGroup}>
-                    <Pressable
-                      onPress={() => router.push('/(tabs)/quan-ly-ao')}
-                      style={styles.clickablePondTitle}>
-                      <Text style={[styles.pondName, { color: colors.primary }]}>AO 2</Text>
-                      <MaterialIcons name="open-in-new" size={16} color={colors.primary} />
-                    </Pressable>
-                    <View style={[styles.statusPill, { backgroundColor: colors.primary }]}>
-                      <MaterialIcons name="rotate-right" size={13} color="#FFFFFF" />
-                      <Text style={[styles.statusPillText, { color: '#FFFFFF' }]}>
-                        {ao2Running ? 'ĐANG PHUN CỮ TRƯA' : 'TẠM DỪNG'}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={[styles.pondSub, { color: colors.onSurfaceVariant }]}>
-                    Tôm thẻ • 42 ngày tuổi
-                  </Text>
-                </View>
-
-                <View style={[styles.feedStatBox, { backgroundColor: colors.surfaceContainerLow }]}>
-                  <Text style={[styles.feedStatLabel, { color: colors.outline }]}>Tiến độ cữ</Text>
-                  <Text style={[styles.feedStatVal, { color: colors.secondary }]}>
-                    16 <Text style={{ fontSize: 11, color: colors.outline }}>/ 22 kg</Text>
-                  </Text>
-                </View>
-              </View>
-
-              {/* Progress bar */}
-              <View style={[styles.progressBarBg, { backgroundColor: colors.surfaceContainerHigh }]}>
-                <View style={[styles.progressBarFill, { width: '72%', backgroundColor: colors.primary }]} />
-              </View>
-
-              <View style={styles.metricsGrid}>
-                <View style={[styles.metricBox, { backgroundColor: colors.surfaceContainerLow }]}>
-                  <View style={styles.metricBoxLeft}>
-                    <View style={[styles.metricIconBox, { backgroundColor: colors.primaryFixed }]}>
-                      <MaterialIcons name="air" size={16} color={colors.primary} />
-                    </View>
-                    <View>
-                      <Text style={[styles.metricLabel, { color: colors.onSurfaceVariant }]}>Oxy (DO)</Text>
-                      <Text style={[styles.metricNumber, { color: colors.secondary }]}>
-                        5.5 <Text style={styles.metricSubUnit}>mg/L</Text>
-                      </Text>
-                    </View>
-                  </View>
-                  <MaterialIcons name="check" size={18} color={colors.secondary} />
-                </View>
-
-                <View style={[styles.metricBox, { backgroundColor: colors.surfaceContainerLow }]}>
-                  <View style={styles.metricBoxLeft}>
-                    <View style={[styles.metricIconBox, { backgroundColor: colors.secondaryContainer }]}>
-                      <MaterialIcons name="science" size={16} color={colors.secondary} />
-                    </View>
-                    <View>
-                      <Text style={[styles.metricLabel, { color: colors.onSurfaceVariant }]}>Độ pH</Text>
-                      <Text style={[styles.metricNumber, { color: colors.onSurface }]}>
-                        7.8 <Text style={styles.metricSubUnit}>pH</Text>
-                      </Text>
-                    </View>
-                  </View>
-                  <MaterialIcons name="check" size={18} color={colors.secondary} />
-                </View>
-              </View>
-
-              {/* Feeder status box + Toggle action */}
-              <View style={[styles.feederBanner, { backgroundColor: colors.primaryFixed + '50' }]}>
-                <View style={styles.feederBannerLeft}>
-                  <MaterialIcons name="cyclone" size={22} color={colors.primary} />
-                  <View style={{ flex: 1 }}>
-                    <Text numberOfLines={1} style={[styles.feederTextBold, { color: colors.onPrimaryFixed }]}>
-                      Máy phun quay 45 Hz
-                    </Text>
-                    <Text numberOfLines={1} style={[styles.feederTextSub, { color: colors.onPrimaryFixedVariant }]}>
-                      Bán kính rải 8 mét
-                    </Text>
-                  </View>
-                </View>
-
-                <Pressable
-                  onPress={() => setAo2Running(!ao2Running)}
-                  style={({ pressed }) => [
-                    styles.feederToggleBtn,
-                    { backgroundColor: colors.primary, opacity: pressed ? 0.9 : 1 },
+              return (
+                <View
+                  key={meal.id}
+                  style={[
+                    styles.mealCard,
+                    {
+                      backgroundColor: colors.surfaceContainerLowest,
+                      borderColor: isActive
+                        ? '#F97316'
+                        : isCompleted
+                        ? '#7CF994'
+                        : colors.outlineVariant + '40',
+                      borderLeftWidth: 5,
+                      borderLeftColor: isActive
+                        ? '#F97316'
+                        : isCompleted
+                        ? '#006E2D'
+                        : isAi
+                        ? '#F97316'
+                        : colors.outlineVariant,
+                    },
                   ]}>
-                  <Text style={styles.feederToggleText}>
-                    {ao2Running ? 'TẠM DỪNG' : 'TIẾP TỤC'}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
+                  <View style={styles.mealCardHeader}>
+                    <View style={styles.mealTitleGroup}>
+                      <Text style={[styles.mealName, { color: colors.onSurface }]}>
+                        {meal.name}
+                      </Text>
+                      <Text style={[styles.mealTime, { color: colors.onSurfaceVariant }]}>
+                        • {meal.time}
+                      </Text>
+                    </View>
 
-            {/* AO 3 */}
-            <View
-              style={[
-                styles.pondCard,
-                {
-                  backgroundColor: colors.surfaceContainerLowest,
-                  borderLeftColor: colors.tertiaryContainer,
-                },
-              ]}>
-              <View style={styles.pondCardHeader}>
-                <View>
-                  <View style={styles.pondTitleGroup}>
-                    <Text style={[styles.pondName, { color: colors.onSurface }]}>AO 3</Text>
                     <View
                       style={[
                         styles.statusPill,
-                        { backgroundColor: ao3Refilled ? colors.secondary : colors.tertiaryContainer },
+                        {
+                          backgroundColor: isCompleted
+                            ? '#E8F5E9'
+                            : isActive
+                            ? '#FFF3E0'
+                            : '#EFF4FF',
+                        },
                       ]}>
-                      <MaterialIcons
-                        name={ao3Refilled ? 'check-circle' : 'warning'}
-                        size={13}
-                        color="#FFFFFF"
-                      />
-                      <Text style={[styles.statusPillText, { color: '#FFFFFF' }]}>
-                        {ao3Refilled ? 'ĐÃ NẠP CÁM' : 'HẾT CÁM'}
+                      <Text
+                        style={[
+                          styles.statusPillText,
+                          {
+                            color: isCompleted
+                              ? '#006E2D'
+                              : isActive
+                              ? '#9D4300'
+                              : '#584237',
+                          },
+                        ]}>
+                        {isCompleted ? '✓ Hoàn thành' : isActive ? '⚡ Đang phun' : '⏳ Chờ đến giờ'}
                       </Text>
                     </View>
                   </View>
-                  <Text style={[styles.pondSub, { color: colors.onSurfaceVariant }]}>
-                    Tôm sú giống • 25 ngày tuổi
-                  </Text>
-                </View>
 
-                <View style={[styles.feedStatBox, { backgroundColor: colors.tertiaryFixed + '40' }]}>
-                  <Text style={[styles.feedStatLabel, { color: colors.tertiary }]}>Trong phễu</Text>
-                  <Text style={[styles.feedStatVal, { color: colors.tertiaryContainer }]}>
-                    {ao3Refilled ? '30' : '< 5'} <Text style={styles.feedStatUnit}>kg</Text>
-                  </Text>
-                </View>
-              </View>
-
-              <View style={[styles.refillBanner, { backgroundColor: colors.tertiaryFixed + '40' }]}>
-                <View style={styles.refillBannerLeft}>
-                  <MaterialIcons name="inventory-2" size={22} color={colors.tertiaryContainer} />
-                  <View>
-                    <Text style={[styles.refillTitle, { color: colors.onTertiaryFixed }]}>
-                      {ao3Refilled ? 'Đã nạp đủ cám' : 'Cần nạp 1 bao (25kg)'}
-                    </Text>
-                    <Text style={[styles.refillSub, { color: colors.onTertiaryFixedVariant }]}>
-                      Phễu tự ngắt an toàn
+                  <View style={styles.mealMetaRow}>
+                    <Text style={styles.mealFeedType}>{meal.feedType}</Text>
+                    <Text style={[styles.mealKg, { color: colors.onSurface }]}>
+                      {meal.dispensedKg > 0 ? `${meal.dispensedKg} / ` : ''}
+                      <Text style={{ fontWeight: '900', color: '#9D4300' }}>
+                        {meal.targetKg} kg
+                      </Text>
                     </Text>
                   </View>
+
+                  {meal.notes && (
+                    <Text style={styles.mealNotes}>📝 {meal.notes}</Text>
+                  )}
                 </View>
-
-                <Pressable
-                  onPress={() => {
-                    setAo3Refilled(true);
-                    Alert.alert('Nạp cám thành công', 'Đã ghi nhận nạp 1 bao cám (25kg) vào phễu Ao 3!');
-                  }}
-                  style={({ pressed }) => [
-                    styles.refillBtn,
-                    { backgroundColor: colors.tertiary, opacity: pressed ? 0.9 : 1 },
-                  ]}>
-                  <MaterialIcons name="add-circle" size={16} color="#FFFFFF" />
-                  <Text style={styles.refillBtnText}>Đã Nạp Cám</Text>
-                </Pressable>
-              </View>
-            </View>
-
-            {/* AO 4 */}
-            <View
-              style={[
-                styles.pondCard,
-                {
-                  backgroundColor: colors.surfaceContainerLowest,
-                  borderLeftColor: colors.secondary,
-                },
-              ]}>
-              <View style={styles.pondCardHeader}>
-                <View>
-                  <View style={styles.pondTitleGroup}>
-                    <Text style={[styles.pondName, { color: colors.onSurface }]}>AO 4</Text>
-                    <View style={[styles.statusPill, { backgroundColor: colors.secondaryContainer }]}>
-                      <MaterialIcons name="verified" size={13} color={colors.onSecondaryContainer} />
-                      <Text style={[styles.statusPillText, { color: colors.onSecondaryContainer }]}>
-                        NƯỚC TỐT
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={[styles.pondSub, { color: colors.onSurfaceVariant }]}>
-                    Tôm thẻ • 18 ngày tuổi (Ương vèo)
-                  </Text>
-                </View>
-
-                <View style={[styles.feedStatBox, { backgroundColor: colors.surfaceContainerLow }]}>
-                  <Text style={[styles.feedStatLabel, { color: colors.outline }]}>Đã rải hôm nay</Text>
-                  <Text style={[styles.feedStatVal, { color: colors.primary }]}>
-                    40 <Text style={styles.feedStatUnit}>kg</Text>
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.metricsGrid}>
-                <View style={[styles.metricBox, { backgroundColor: colors.surfaceContainerLow }]}>
-                  <View style={styles.metricBoxLeft}>
-                    <View style={[styles.metricIconBox, { backgroundColor: colors.secondaryContainer }]}>
-                      <MaterialIcons name="air" size={16} color={colors.secondary} />
-                    </View>
-                    <View>
-                      <Text style={[styles.metricLabel, { color: colors.onSurfaceVariant }]}>Oxy (DO)</Text>
-                      <Text style={[styles.metricNumber, { color: colors.secondary }]}>
-                        6.0 <Text style={styles.metricSubUnit}>mg/L</Text>
-                      </Text>
-                    </View>
-                  </View>
-                  <MaterialIcons name="check" size={18} color={colors.secondary} />
-                </View>
-
-                <View style={[styles.metricBox, { backgroundColor: colors.surfaceContainerLow }]}>
-                  <View style={styles.metricBoxLeft}>
-                    <View style={[styles.metricIconBox, { backgroundColor: colors.primaryFixed }]}>
-                      <MaterialIcons name="water-drop" size={16} color={colors.primary} />
-                    </View>
-                    <View>
-                      <Text style={[styles.metricLabel, { color: colors.onSurfaceVariant }]}>Độ mặn</Text>
-                      <Text style={[styles.metricNumber, { color: colors.onSurface }]}>
-                        15 <Text style={styles.metricSubUnit}>‰</Text>
-                      </Text>
-                    </View>
-                  </View>
-                  <MaterialIcons name="check" size={18} color={colors.secondary} />
-                </View>
-              </View>
-            </View>
-          </View>
-
-          {/* Machinery Showcase Banner */}
-          <View style={[styles.machineryCard, { backgroundColor: colors.surfaceContainer }]}>
-            <View style={[styles.machineryImgBox, { backgroundColor: colors.surfaceContainerHigh }]}>
-              <Image
-                source={{
-                  uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBxKFOZkARYkOKF79ksjv8Q3ZLsyIuHVrkMHFqkvAdxKAZDOn5CwF5iSTc4rRKywVkdsPiCVpBYw0TcWbSKiefrUJQY4RIiXoMge0Wzt00mmAXFxTchPht7oFsCN2j0VYCZbEuChWPCIb9Iu4QvzdlW7XhwHAm3RVEDtwSEAlWD5lnYu1ILhSTz5CR8KG0RjxYexgA4X5Yxvn17BBh5iHHsfZlT5SxJbdEBlCiDSLqRzWKGPZPITZgXMQ',
-                }}
-                style={styles.machineryImg}
-                contentFit="cover"
-              />
-            </View>
-            <View style={styles.machineryContent}>
-              <View style={styles.machineryTag}>
-                <MaterialIcons name="verified" size={14} color={colors.secondary} />
-                <Text style={[styles.machineryTagText, { color: colors.secondary }]}>
-                  Động cơ biến tần chống ẩm
-                </Text>
-              </View>
-              <Text style={[styles.machineryTitle, { color: colors.onSurface }]}>
-                5 Máy Cho Ăn ShrimpMate
-              </Text>
-              <Text style={[styles.machinerySub, { color: colors.onSurfaceVariant }]}>
-                Hiệu chuẩn định kỳ lúc 06:00 sáng. Pin mặt trời nạp đầy 100%.
-              </Text>
-            </View>
-          </View>
-
-          {/* Big Red Emergency Stop Button */}
-          <Pressable
-            onPress={handleEmergencyStopAll}
-            style={({ pressed }) => [
-              styles.emergencyBtn,
-              { backgroundColor: colors.error, opacity: pressed ? 0.9 : 1 },
-            ]}>
-            <View style={styles.emergencyLeft}>
-              <View style={styles.emergencyIconBox}>
-                <MaterialIcons name="gpp-bad" size={26} color="#FFFFFF" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.emergencyTitle}>NGẮT ĐIỆN TẤT CẢ MÁY CHO ĂN</Text>
-                <Text style={styles.emergencySub}>Dùng khi có giông sét hoặc sự cố khẩn cấp</Text>
-              </View>
-            </View>
-            <MaterialIcons name="power-settings-new" size={24} color="#FFFFFF" />
-          </Pressable>
-
-          {/* Connectivity Banner */}
-          <View
-            style={[
-              styles.connectivityCard,
-              { backgroundColor: colors.surfaceContainerLow },
-            ]}>
-            <View style={styles.connectivityLeft}>
-              <View style={[styles.connDot, { backgroundColor: colors.secondary }]} />
-              <Text numberOfLines={1} style={[styles.connText, { color: colors.onSurfaceVariant }]}>
-                Đang kết nối 4G ổn định • Có dự phòng Bluetooth bờ ao
-              </Text>
-            </View>
-            <MaterialIcons name="bluetooth-connected" size={20} color={colors.secondary} />
+              );
+            })}
           </View>
         </View>
       </ScrollView>
+
+      {/* Modal: Thêm Cữ Ăn Phụ */}
+      <Modal
+        visible={showExtraModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowExtraModal(false)}>
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setShowExtraModal(false)}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalHeading}>THÊM CỮ ĂN PHỤ / TRỘN THUỐC</Text>
+            <Text style={styles.modalSub}>
+              Nhập số lượng cám bổ sung và ghi chú dinh dưỡng cho ao
+            </Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Khẩu phần (kg cám):</Text>
+              <TextInput
+                style={styles.textInput}
+                keyboardType="numeric"
+                value={extraKg}
+                onChangeText={setExtraKg}
+                placeholder="Ví dụ: 5"
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Ghi chú / Loại men thuốc:</Text>
+              <TextInput
+                style={styles.textInput}
+                value={extraNote}
+                onChangeText={setExtraNote}
+                placeholder="Ví dụ: Men tỏi đường ruột, khoáng tạt"
+              />
+            </View>
+
+            <View style={styles.modalActions}>
+              <Pressable
+                onPress={() => setShowExtraModal(false)}
+                style={styles.btnCancel}>
+                <Text style={styles.btnCancelText}>Hủy</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleSaveExtraMeal}
+                style={styles.btnConfirm}>
+                <Text style={styles.btnConfirmText}>Lưu Cữ Ăn</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -591,582 +388,400 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 24,
+    paddingTop: 16,
+    paddingBottom: 40,
   },
   container: {
-    maxWidth: 550,
+    maxWidth: 500,
     width: '100%',
     alignSelf: 'center',
     gap: 14,
   },
-  contextCard: {
+  pondStrip: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-  },
-  contextLeft: {
-    flex: 1,
-    gap: 4,
-    marginRight: 8,
-  },
-  contextTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  contextTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  contextMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  activePondsPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 999,
-  },
-  activePondsText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  weatherItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  metaText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  notiBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  notiDot: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  heroCard: {
-    height: 140,
-    borderRadius: 14,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  heroImg: {
-    width: '100%',
-    height: '100%',
-  },
-  heroOverlay: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(20, 26, 40, 0.65)',
-    justifyContent: 'flex-end',
-    padding: 12,
-  },
-  heroOverlayContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  heroStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flex: 1,
-    marginRight: 8,
-  },
-  heroDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  heroText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
-    flexShrink: 1,
-  },
-  iotBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  iotBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  summaryCard: {
-    padding: 14,
     borderRadius: 16,
-    gap: 12,
-  },
-  summaryTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  summaryTitleGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  summaryIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  summaryTitle: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  summarySub: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 11,
-    fontWeight: '500',
-  },
-  liveBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-  },
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  liveText: {
-    fontSize: 10,
-    fontWeight: '900',
-  },
-  summaryGrid: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  summaryItem: {
-    flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    padding: 10,
-    borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    gap: 4,
-  },
-  summaryItemLabel: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  summaryNumRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 3,
-  },
-  summaryItemVal: {
-    color: '#FFFFFF',
-    fontSize: 26,
-    fontWeight: '900',
-  },
-  summaryItemUnit: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  summaryItemTag: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    alignSelf: 'flex-start',
-  },
-  summaryItemTagText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  warningBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 8,
-    borderRadius: 10,
-  },
-  warningBannerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flex: 1,
-    marginRight: 8,
-  },
-  warningBannerText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  warningBannerTime: {
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  warningBannerTimeText: {
-    color: '#FFFFFF',
-    fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 4,
-  },
-  sectionTitleLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  pondCountPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-  pondCountText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  pondsList: {
-    gap: 12,
-  },
-  pondCard: {
-    padding: 14,
-    borderRadius: 14,
-    borderLeftWidth: 6,
-    gap: 12,
+    elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 3,
-    elevation: 2,
   },
-  pondCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-  },
-  pondTitleGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  clickablePondTitle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  pondName: {
-    fontSize: 20,
-    fontWeight: '900',
-  },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 999,
-  },
-  statusPillText: {
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  pondSub: {
-    fontSize: 11,
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  feedStatBox: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    alignItems: 'flex-end',
-  },
-  feedStatLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-  },
-  feedStatVal: {
-    fontSize: 15,
-    fontWeight: '900',
-  },
-  feedStatUnit: {
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  progressBarBg: {
-    height: 6,
-    borderRadius: 999,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    borderRadius: 999,
-  },
-  metricsGrid: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  metricBox: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 8,
-    borderRadius: 10,
-  },
-  metricBoxLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  metricIconBox: {
-    width: 28,
-    height: 28,
-    borderRadius: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  metricLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-  },
-  metricNumber: {
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  metricSubUnit: {
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  pondStatusFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 8,
-  },
-  pondStatusLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  pondStatusText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  nextFeedBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  nextFeedText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  feederBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 10,
-    borderRadius: 10,
-  },
-  feederBannerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-    marginRight: 8,
-  },
-  feederTextBold: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  feederTextSub: {
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  feederToggleBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 8,
-  },
-  feederToggleText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  refillBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 10,
-    borderRadius: 10,
-  },
-  refillBannerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  refillTitle: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  refillSub: {
-    fontSize: 10,
-  },
-  refillBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  refillBtnText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  machineryCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 12,
-    borderRadius: 14,
-  },
-  machineryImgBox: {
-    width: 68,
-    height: 68,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  machineryImg: {
-    width: '100%',
-    height: '100%',
-  },
-  machineryContent: {
-    flex: 1,
-    gap: 2,
-  },
-  machineryTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  machineryTagText: {
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  machineryTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  machinerySub: {
-    fontSize: 10,
-    lineHeight: 14,
-  },
-  emergencyBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 14,
-    borderRadius: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  emergencyLeft: {
+  pondStripLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     flex: 1,
-    marginRight: 8,
   },
-  emergencyIconBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+  pondIconBox: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emergencyTitle: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  emergencySub: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 10,
-    fontWeight: '600',
-    marginTop: 1,
-  },
-  connectivityCard: {
+  pondNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
+    gap: 4,
   },
-  connectivityLeft: {
+  pondNameText: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  pondSubText: {
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  weatherBox: {
+    alignItems: 'flex-end',
+  },
+  weatherLabel: {
+    fontSize: 11,
+    color: '#584237',
+    fontWeight: '600',
+  },
+  tempRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  tempVal: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#F97316',
+  },
+  heroCard: {
+    padding: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 14,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+  },
+  heroHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  heroTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  heroTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  badgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  metricGrid: {
+    flexDirection: 'row',
+    gap: 8,
+    padding: 10,
+    borderRadius: 14,
+  },
+  metricCol: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 10,
+    elevation: 1,
+  },
+  colLabel: {
+    fontSize: 11,
+    color: '#584237',
+    fontWeight: '600',
+  },
+  colVal: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#0B1C30',
+    marginTop: 2,
+  },
+  colUnit: {
+    fontSize: 11,
+    color: '#584237',
+    fontWeight: '600',
+  },
+  progressSection: {
+    gap: 6,
+  },
+  progressLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  progressPercentText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#006E2D',
+  },
+  progressSubText: {
+    fontSize: 11,
+    color: '#584237',
+    fontWeight: '600',
+  },
+  progressBarTrack: {
+    height: 8,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  aiCard: {
+    padding: 16,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    gap: 8,
+  },
+  aiHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  aiBadgeGroup: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     flex: 1,
-    marginRight: 8,
   },
-  connDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
+  aiBadgeTitle: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#9D4300',
+    letterSpacing: 0.3,
   },
-  connText: {
-    fontSize: 11,
+  aiStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: '#FFDBCA',
+  },
+  aiStatusText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#9D4300',
+  },
+  aiBodyText: {
+    fontSize: 14,
+    color: '#0B1C30',
     fontWeight: '600',
+  },
+  aiReasonText: {
+    fontSize: 12,
+    color: '#584237',
+    lineHeight: 18,
+  },
+  aiActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 6,
+  },
+  btnAiAccept: {
+    flex: 1,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: '#006E2D',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  btnAiAcceptText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  btnAiKeep: {
+    flex: 1,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: '#EFF4FF',
+    borderWidth: 1,
+    borderColor: '#E0C0B1',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnAiKeepText: {
+    color: '#584237',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  addMealBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  addMealText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#9D4300',
+  },
+  timelineList: {
+    gap: 10,
+  },
+  mealCard: {
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 6,
+  },
+  mealCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  mealTitleGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  mealName: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  mealTime: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  statusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  statusPillText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  mealMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  mealFeedType: {
+    fontSize: 12,
+    color: '#584237',
+  },
+  mealKg: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  mealNotes: {
+    fontSize: 11,
+    color: '#707881',
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 20,
+    gap: 12,
+  },
+  modalHeading: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#0B1C30',
+  },
+  modalSub: {
+    fontSize: 12,
+    color: '#584237',
+  },
+  inputGroup: {
+    gap: 4,
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0B1C30',
+  },
+  textInput: {
+    height: 48,
+    borderWidth: 1.5,
+    borderColor: '#E0C0B1',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    backgroundColor: '#EFF4FF',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+  },
+  btnCancel: {
+    flex: 1,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#EFF4FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnCancelText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#584237',
+  },
+  btnConfirm: {
+    flex: 1,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#F97316',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnConfirmText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
 });

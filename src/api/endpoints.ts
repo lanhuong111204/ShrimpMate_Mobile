@@ -1,10 +1,13 @@
 export const Endpoints = {
   auth: {
     login: '/auth/login',
-    register: '/auth/register',
-    refreshToken: '/auth/refresh',
+    refreshToken: '/auth/refresh-token',
+    forgotPassword: '/auth/forgot-password',
+    resetPassword: '/auth/reset-password',
+    changePassword: '/auth/change-password',
     me: '/auth/me',
-    logout: '/auth/logout',
+    register: '/auth/register',
+    profile: '/auth/profile',
   },
   ponds: {
     list: '/ponds',
