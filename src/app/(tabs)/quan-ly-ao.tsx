@@ -17,12 +17,16 @@ export default function ScreenTrayWater() {
   const colors = useTheme();
   const {
     farmInfo,
+    selectedPond,
+    selectedFarm,
     appetiteLevel,
     setAppetiteLevel,
     trayCleanPercent,
     isScanningTray,
     scanTray,
   } = useFarm();
+
+  const pondDisplayName = selectedPond?.name || selectedPond?.code || farmInfo.selectedPond;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.surface }]}>
@@ -43,7 +47,7 @@ export default function ScreenTrayWater() {
                 <View style={styles.pingDot} />
               </View>
               <Text style={[styles.statusText, { color: colors.onSurfaceVariant }]}>
-                Cữ gần nhất: 10:30 (Cữ 2)
+                {pondDisplayName} • Giám sát trực tiếp
               </Text>
             </View>
             <View style={[styles.bioBadge, { backgroundColor: colors.secondaryContainer }]}>
@@ -88,7 +92,9 @@ export default function ScreenTrayWater() {
                 </View>
                 <View>
                   <Text style={styles.activityTitle}>Sức ăn tôm: Rất Mạnh</Text>
-                  <Text style={styles.activitySub}>Nhá số 02 • Giữa tim ao</Text>
+                  <Text style={styles.activitySub}>
+                    {selectedPond?.code ? `${selectedPond.code} • ` : ''}Nhá số 02 • Giữa tim ao
+                  </Text>
                 </View>
               </View>
             </View>

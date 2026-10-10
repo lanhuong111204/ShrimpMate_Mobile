@@ -18,26 +18,28 @@ interface AppHeaderProps {
   subtitle?: string;
 }
 
-const PONDS_LIST = [
-  'AO 01 - Tiêu Chuẩn',
-  'AO 02 - Tôm Mẫu',
-  'AO 03-VIP',
-  'AO 04 - Ươm Giống',
-];
-
 export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, isOfflineMode, logout } = useAuth();
-  const { farmInfo, updateFarmInfo } = useFarm();
+  const {
+    farms,
+    selectedFarm,
+    ponds,
+    selectedPond,
+    selectFarm,
+    selectPond,
+    isLoadingPonds,
+    refreshFarmsAndPonds,
+    farmInfo,
+  } = useFarm();
 
   const [showPondModal, setShowPondModal] = useState(false);
   const [showNotiModal, setShowNotiModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
 
-  const handleSelectPond = (pondName: string) => {
-    const cleanName = pondName.split(' - ')[0];
-    updateFarmInfo({ selectedPond: cleanName });
+  const handleSelectPond = (pondId: string) => {
+    selectPond(pondId);
     setShowPondModal(false);
   };
 
@@ -46,6 +48,13 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
     await logout();
     router.replace('/(auth)/login');
   };
+
+  // Tên hiển thị trên nút Pill ao nuôi
+  const displayPondName =
+    selectedPond?.name ||
+    selectedPond?.code ||
+    farmInfo.selectedPond ||
+    'Chọn Ao Nuôi';
 
   return (
     <View
@@ -65,7 +74,7 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
           <View>
             <Text style={styles.brandTitle}>ShrimpMate</Text>
             <Text numberOfLines={1} style={styles.brandSubtitle}>
-              {subtitle}
+              {selectedFarm?.name ? `${selectedFarm.name} • ${subtitle}` : subtitle}
             </Text>
           </View>
         </View>
@@ -81,7 +90,7 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
             ]}>
             <View style={styles.onlineDot} />
             <Text numberOfLines={1} style={styles.pondPillText}>
-              {farmInfo.selectedPond}
+              {displayPondName}
             </Text>
             <MaterialIcons name="expand-more" size={16} color="#FFFFFF" />
           </Pressable>
@@ -109,7 +118,7 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
         </View>
       </View>
 
-      {/* MODAL 1: POND SELECTOR */}
+      {/* MODAL 1: POND SELECTOR ĐỘNG */}
       <Modal
         visible={showPondModal}
         transparent
@@ -118,37 +127,164 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
         <Pressable
           style={styles.modalBackdrop}
           onPress={() => setShowPondModal(false)}>
-          <View style={styles.modalCard}>
+          <View
+            style={styles.modalCard}
+            onStartShouldSetResponder={() => true}
+            onTouchEnd={(e) => e.stopPropagation()}>
             <View style={styles.modalHeader}>
-              <MaterialIcons name="waves" size={22} color="#EA580C" />
-              <Text style={styles.modalTitle}>CHỌN AO NUÔI QUẢN LÝ</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                <MaterialIcons name="waves" size={22} color="#EA580C" />
+                <Text style={styles.modalTitle}>CHỌN AO NUÔI QUẢN LÝ</Text>
+              </View>
+              <Pressable
+                onPress={() => refreshFarmsAndPonds()}
+                style={{ padding: 4, marginRight: 4 }}>
+                <MaterialIcons name="refresh" size={20} color="#8C7164" />
+              </Pressable>
+              <Pressable
+                onPress={() => setShowPondModal(false)}
+                style={{ padding: 4 }}>
+                <MaterialIcons name="close" size={20} color="#8C7164" />
+              </Pressable>
             </View>
-            <View style={styles.modalList}>
-              {PONDS_LIST.map((p) => {
-                const clean = p.split(' - ')[0];
-                const isSelected = farmInfo.selectedPond === clean;
-                return (
-                  <Pressable
-                    key={p}
-                    onPress={() => handleSelectPond(p)}
-                    style={[
-                      styles.pondItem,
-                      isSelected && styles.pondItemSelected,
-                    ]}>
-                    <Text
-                      style={[
-                        styles.pondItemText,
-                        isSelected && styles.pondItemTextSelected,
-                      ]}>
-                      {p}
-                    </Text>
-                    {isSelected && (
-                      <MaterialIcons name="check" size={20} color="#EA580C" />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
+
+            {/* Farm Selector Tabs (nếu người nuôi có nhiều hơn 1 trang trại) */}
+            {farms.length > 1 && (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={styles.sectionSubtitle}>TRANG TRẠI NUÔI</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+                  {farms.map((f) => {
+                    const isFarmSelected = selectedFarm?.id === f.id;
+                    return (
+                      <Pressable
+                        key={f.id}
+                        onPress={() => selectFarm(f.id)}
+                        style={[
+                          styles.farmTab,
+                          isFarmSelected && styles.farmTabActive,
+                        ]}>
+                        <MaterialIcons
+                          name="location-on"
+                          size={14}
+                          color={isFarmSelected ? '#FFFFFF' : '#8C7164'}
+                        />
+                        <Text
+                          style={[
+                            styles.farmTabText,
+                            isFarmSelected && styles.farmTabTextActive,
+                          ]}>
+                          {f.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* Current Farm Info Banner */}
+            {selectedFarm && (
+              <View style={styles.currentFarmBanner}>
+                <MaterialIcons name="home-work" size={16} color="#EA580C" />
+                <Text numberOfLines={1} style={styles.currentFarmText}>
+                  {selectedFarm.name} {selectedFarm.address ? `• ${selectedFarm.address}` : ''}
+                </Text>
+              </View>
+            )}
+
+            {/* Ponds List */}
+            {isLoadingPonds ? (
+              <View style={{ paddingVertical: 24, alignItems: 'center', gap: 8 }}>
+                <MaterialIcons name="hourglass-empty" size={24} color="#EA580C" />
+                <Text style={{ fontSize: 13, color: '#584237', fontWeight: '600' }}>
+                  Đang nạp danh sách ao nuôi...
+                </Text>
+              </View>
+            ) : ponds.length === 0 ? (
+              <View style={{ paddingVertical: 24, alignItems: 'center', gap: 6 }}>
+                <MaterialIcons name="info-outline" size={26} color="#8C7164" />
+                <Text style={{ fontSize: 13, color: '#584237', fontWeight: '700' }}>
+                  Trang trại chưa có ao nuôi nào
+                </Text>
+                <Text style={{ fontSize: 11, color: '#8C7164' }}>
+                  Vui lòng thêm ao nuôi mới trên hệ thống
+                </Text>
+              </View>
+            ) : (
+              <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+                <View style={styles.modalList}>
+                  {ponds.map((p) => {
+                    const isSelected = selectedPond?.id === p.id;
+                    const isMaintenance = p.status === 'maintenance';
+                    return (
+                      <Pressable
+                        key={p.id}
+                        onPress={() => handleSelectPond(p.id)}
+                        style={[
+                          styles.pondItem,
+                          isSelected && styles.pondItemSelected,
+                        ]}>
+                        <View style={{ flex: 1, gap: 2 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <View style={[styles.pondCodeBadge, isSelected && styles.pondCodeBadgeSelected]}>
+                              <Text style={[styles.pondCodeBadgeText, isSelected && styles.pondCodeBadgeTextSelected]}>
+                                {p.code}
+                              </Text>
+                            </View>
+                            <Text
+                              numberOfLines={1}
+                              style={[
+                                styles.pondItemText,
+                                isSelected && styles.pondItemTextSelected,
+                              ]}>
+                              {p.name}
+                            </Text>
+                          </View>
+
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                            {!!p.areaM2 && (
+                              <Text style={styles.pondAreaText}>
+                                {p.areaM2.toLocaleString('vi-VN')} m²
+                              </Text>
+                            )}
+                            <View
+                              style={[
+                                styles.statusPill,
+                                isMaintenance ? styles.statusPillWarning : styles.statusPillActive,
+                              ]}>
+                              <View
+                                style={[
+                                  styles.statusDot,
+                                  isMaintenance
+                                    ? { backgroundColor: '#F97316' }
+                                    : { backgroundColor: '#006E2D' },
+                                ]}
+                              />
+                              <Text
+                                style={[
+                                  styles.statusPillText,
+                                  isMaintenance ? { color: '#9D4300' } : { color: '#006E2D' },
+                                ]}>
+                                {isMaintenance ? 'Bảo dưỡng' : 'Đang nuôi'}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+
+                        {isSelected && (
+                          <View style={styles.selectedCheckCircle}>
+                            <MaterialIcons name="check" size={16} color="#FFFFFF" />
+                          </View>
+                        )}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            )}
           </View>
         </Pressable>
       </Modal>
@@ -234,8 +370,12 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
 
             <View style={styles.profileDetails}>
               <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Trang trại nuôi:</Text>
+                <Text style={styles.detailVal}>{selectedFarm?.name || farmInfo.farmName}</Text>
+              </View>
+              <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Vị trí khu nuôi:</Text>
-                <Text style={styles.detailVal}>{farmInfo.location}</Text>
+                <Text style={styles.detailVal}>{selectedFarm?.address || farmInfo.location}</Text>
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Độ mặn trạm:</Text>
@@ -560,5 +700,107 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '900',
     color: '#BA1A1A',
+  },
+  sectionSubtitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#8C7164',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  farmTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#EFF4FF',
+    borderWidth: 1,
+    borderColor: '#D4E3FF',
+  },
+  farmTabActive: {
+    backgroundColor: '#EA580C',
+    borderColor: '#EA580C',
+  },
+  farmTabText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#584237',
+  },
+  farmTabTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
+  currentFarmBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FFEDD5',
+    marginBottom: 10,
+  },
+  currentFarmText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#9A3412',
+    flex: 1,
+  },
+  pondCodeBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: '#E0E7FF',
+  },
+  pondCodeBadgeSelected: {
+    backgroundColor: '#EA580C',
+  },
+  pondCodeBadgeText: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#3730A3',
+  },
+  pondCodeBadgeTextSelected: {
+    color: '#FFFFFF',
+  },
+  pondAreaText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#584237',
+  },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  statusPillActive: {
+    backgroundColor: '#E8F5E9',
+  },
+  statusPillWarning: {
+    backgroundColor: '#FFEDD5',
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  statusPillText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  selectedCheckCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#006E2D',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
