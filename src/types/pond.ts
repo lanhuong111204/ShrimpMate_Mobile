@@ -25,18 +25,32 @@ export interface PondDevice {
 
 export interface Pond {
   id: string;
+  farmId?: string;
   name: string;
   code: string;
   areaM2: number;
-  depthM: number;
+  depthM?: number;
   shrimpCount?: number;
   shrimpAgeDays?: number;
   species?: 'Vannamei' | 'Monodon' | string;
-  status: 'active' | 'harvesting' | 'preparing' | 'empty';
-  latestMetrics: SensorMetric[];
+  status: 'active' | 'harvesting' | 'preparing' | 'empty' | 'inactive' | 'maintenance' | string;
+  latestMetrics?: SensorMetric[];
   devices?: PondDevice[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CreatePondRequest {
+  code: string;
+  name: string;
+  areaM2: number;
+  status?: 'active' | 'inactive' | 'maintenance';
+}
+
+export interface UpdatePondRequest {
+  name?: string;
+  areaM2?: number;
+  status?: 'active' | 'inactive' | 'maintenance';
 }
 
 export interface PondTelemetryLog {

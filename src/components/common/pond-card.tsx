@@ -12,10 +12,11 @@ interface PondCardProps {
 
 export function PondCard({ pond, onPress }: PondCardProps) {
   const colors = useTheme();
+  const metrics = pond.latestMetrics || [];
 
   // Determine overall health: if any metric is critical -> critical; else if any warning -> warning; else optimal
-  const hasCritical = pond.latestMetrics.some((m) => m.status === 'critical');
-  const hasWarning = pond.latestMetrics.some((m) => m.status === 'warning');
+  const hasCritical = metrics.some((m) => m.status === 'critical');
+  const hasWarning = metrics.some((m) => m.status === 'warning');
   const overallStatus = hasCritical ? 'critical' : hasWarning ? 'warning' : 'optimal';
 
   return (
@@ -59,7 +60,7 @@ export function PondCard({ pond, onPress }: PondCardProps) {
       </View>
 
       <View style={[styles.metricsContainer, { borderTopColor: colors.border }]}>
-        {pond.latestMetrics.slice(0, 4).map((metric) => (
+        {metrics.slice(0, 4).map((metric) => (
           <View key={metric.type} style={styles.metricItem}>
             <Text style={[styles.metricLabel, { color: colors.textSecondary }]}>{metric.name}</Text>
             <Text

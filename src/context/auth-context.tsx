@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { apiClient } from '@/api/client';
 import { authService } from '@/api/services/auth.service';
 import {
   ChangePasswordRequest,
@@ -7,6 +8,8 @@ import {
   ResetPasswordRequest,
   UpdateProfileRequest,
   User,
+  VerifyResetOtpRequest,
+  VerifyResetOtpResponse,
 } from '@/types/auth';
 
 interface AuthContextValue {
@@ -17,6 +20,8 @@ interface AuthContextValue {
   login: (credentials: LoginRequest) => Promise<void>;
   register: (data: RegisterRequest) => Promise<void>;
   forgotPassword: (identifier: string) => Promise<string>;
+  verifyResetOtp: (data: VerifyResetOtpRequest) => Promise<VerifyResetOtpResponse>;
+  resendOtp: (identifier: string) => Promise<string>;
   resetPassword: (data: ResetPasswordRequest) => Promise<string>;
   changePassword: (data: ChangePasswordRequest) => Promise<string>;
   updateProfile: (data: UpdateProfileRequest) => Promise<User>;
@@ -32,10 +37,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   useEffect(() => {
+    // Đăng ký lắng nghe sự kiện hết hạn phiên đăng nhập từ ApiClient (401 refresh failed)
+    const unsubscribeSession = apiClient.onSessionExpired(() => {
+      setUser(null);
+    });
+
     async function initAuth() {
       try {
         const currentUser = await authService.getMe();
-        setUser(currentUser);
+        if (currentUser) {
+          // Cold boot guard: Nếu user là admin thì lập tức hủy phiên
+          if (currentUser.role === 'admin') {
+            await authService.logout();
+            setUser(null);
+          } else {
+            // Xác thực quyền farmer với backend
+            try {
+              await authService.checkFarmerRole();
+              setUser(currentUser);
+            } catch (err: any) {
+              if (err?.statusCode === 403 || err?.response?.status === 403) {
+                await authService.logout();
+                setUser(null);
+              } else {
+                // Lỗi mạng hoặc offline, tin tưởng dữ liệu farmer đã lưu trong cache
+                setUser(currentUser);
+              }
+            }
+          }
+        } else {
+          setUser(null);
+        }
       } catch {
         setUser(null);
       } finally {
@@ -44,13 +76,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     initAuth();
+
+    return () => {
+      unsubscribeSession();
+    };
   }, []);
 
   const login = async (credentials: LoginRequest) => {
     setIsLoading(true);
     try {
       const response = await authService.login(credentials);
-      setUser(response.user);
+      
+      // RBAC Guard: Bắt buộc gọi GET /auth/farmer-check để kiểm tra quyền Người nuôi
+      try {
+        await authService.checkFarmerRole();
+        setUser(response.user);
+      } catch (checkErr: any) {
+        // Nếu trả về 403 Forbidden (tài khoản Admin)
+        await authService.logout();
+        setUser(null);
+        const forbiddenError = new Error(
+          checkErr?.message ||
+          'Tài khoản Quản trị viên (Admin) không được phép truy cập ứng dụng di động. Vui lòng sử dụng Web Dashboard.'
+        );
+        (forbiddenError as any).statusCode = 403;
+        (forbiddenError as any).isForbiddenAdmin = true;
+        throw forbiddenError;
+      }
     } finally {
       setIsLoading(false);
     }
@@ -60,6 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
     try {
       const response = await authService.register(data);
+      // Mặc định tài khoản đăng ký mới là farmer
       setUser(response.user);
     } finally {
       setIsLoading(false);
@@ -68,6 +121,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const forgotPassword = async (identifier: string): Promise<string> => {
     const res = await authService.forgotPassword(identifier);
+    return res.message;
+  };
+
+  const verifyResetOtp = async (data: VerifyResetOtpRequest): Promise<VerifyResetOtpResponse> => {
+    return await authService.verifyResetOtp(data);
+  };
+
+  const resendOtp = async (identifier: string): Promise<string> => {
+    const res = await authService.resendOtp(identifier);
     return res.message;
   };
 
@@ -129,6 +191,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         register,
         forgotPassword,
+        verifyResetOtp,
+        resendOtp,
         resetPassword,
         changePassword,
         updateProfile,

@@ -5,14 +5,26 @@ import { Storage } from '@/utils/storage';
 import {
   AuthResponse,
   ChangePasswordRequest,
+  FarmerCheckResponse,
   LoginRequest,
   RegisterRequest,
   ResetPasswordRequest,
   UpdateProfileRequest,
   User,
+  VerifyResetOtpRequest,
+  VerifyResetOtpResponse,
 } from '@/types/auth';
 
 export const authService = {
+  /**
+   * Xác thực tài khoản có quyền Người nuôi (Farmer) hay không
+   * Trả về 200 OK nếu là Farmer, 403 Forbidden nếu là Admin
+   */
+  async checkFarmerRole(): Promise<FarmerCheckResponse> {
+    const response = await apiClient.get<FarmerCheckResponse>(Endpoints.auth.farmerCheck);
+    return response.data;
+  },
+
   async updateProfile(data: UpdateProfileRequest): Promise<User> {
     const payload: UpdateProfileRequest = {};
     if (data.fullName !== undefined && data.fullName.trim() !== '') {
@@ -41,6 +53,7 @@ export const authService = {
     );
     return response.data;
   },
+
   async register(data: RegisterRequest): Promise<AuthResponse> {
     const payload = {
       fullName: data.fullName.trim(),
@@ -85,7 +98,6 @@ export const authService = {
         await Storage.setItem(AppConfig.storageKeys.refreshToken, data.refreshToken);
       }
       if (data.user) {
-        // ensure fullName & name compatibility
         if (!data.user.name && data.user.fullName) data.user.name = data.user.fullName;
         if (!data.user.phone && data.user.phoneNumber) data.user.phone = data.user.phoneNumber;
         await Storage.setJSON(AppConfig.storageKeys.userData, data.user);
@@ -98,6 +110,27 @@ export const authService = {
     const response = await apiClient.post<{ message: string }>(
       Endpoints.auth.forgotPassword,
       { identifier: identifier.trim() },
+      { skipAuth: true }
+    );
+    return response.data;
+  },
+
+  async resendOtp(identifier: string): Promise<{ message: string }> {
+    const response = await apiClient.post<{ message: string }>(
+      Endpoints.auth.resendOtp,
+      { identifier: identifier.trim() },
+      { skipAuth: true }
+    );
+    return response.data;
+  },
+
+  async verifyResetOtp(data: VerifyResetOtpRequest): Promise<VerifyResetOtpResponse> {
+    const response = await apiClient.post<VerifyResetOtpResponse>(
+      Endpoints.auth.verifyResetOtp,
+      {
+        identifier: data.identifier.trim(),
+        otp: data.otp.trim(),
+      },
       { skipAuth: true }
     );
     return response.data;
@@ -124,7 +157,7 @@ export const authService = {
       phone: 'Ngoại tuyến',
       fullName: 'Bà Con Đầm Tôm (Bờ Ao Ngoại Tuyến)',
       name: 'Bà Con Đầm Tôm (Bờ Ao Ngoại Tuyến)',
-      role: 'guest_offline',
+      role: 'farmer',
       isActive: true,
       createdAt: new Date().toISOString(),
     };
