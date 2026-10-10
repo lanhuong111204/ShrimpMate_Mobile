@@ -15,6 +15,9 @@ import { useFarm } from '@/context/farm-context';
 export default function ScreenLiveFeeder() {
   const colors = useTheme();
   const {
+    selectedPond,
+    selectedFarm,
+    farmInfo,
     dispensedKg,
     targetKg,
     feederPaused,
@@ -87,7 +90,7 @@ export default function ScreenLiveFeeder() {
                 ]}>
                 {isEmergencyStopped
                   ? 'TRẠNG THÁI: DỪNG KHẨN CẤP ĐÃ KÍCH HOẠT'
-                  : 'LIÊN ĐỘNG AN TOÀN KÍCH HOẠT'}
+                  : `LIÊN ĐỘNG AN TOÀN (${selectedPond?.code || 'AO NUÔI'})`}
               </Text>
             </View>
             <Text
@@ -97,7 +100,7 @@ export default function ScreenLiveFeeder() {
               ]}>
               {isEmergencyStopped
                 ? 'Đã ngắt toàn bộ nguồn điện rơ-le máy rải cám qua sóng LoRa bờ ao.'
-                : '✓ Oxy hòa tan: 5.5 mg/L • Nhiệt độ: 31°C → Đạt chuẩn phun cám an toàn.'}
+                : `✓ ${selectedPond?.name || farmInfo.selectedPond}: Oxy hòa tan 5.5 mg/L • Đạt chuẩn phun cám an toàn.`}
             </Text>
           </View>
 
@@ -132,7 +135,9 @@ export default function ScreenLiveFeeder() {
                     : 'ĐANG PHUN CÁM (CỮ 2)'}
                 </Text>
               </View>
-              <Text style={styles.gaugeSub}>LoRa 433MHz • Bờ ao</Text>
+              <Text style={styles.gaugeSub}>
+                {selectedPond?.code ? `${selectedPond.code} • ` : ''}LoRa 433MHz • Bờ ao
+              </Text>
             </View>
 
             {/* Big Circular Progress Indicator */}

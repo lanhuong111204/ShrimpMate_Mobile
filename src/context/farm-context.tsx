@@ -1,5 +1,9 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { Alert } from 'react-native';
+import { useAuth } from '@/context/auth-context';
+import { farmPondService } from '@/api/services/farm-pond.service';
+import { CreateFarmRequest, Farm } from '@/types/farm';
+import { CreatePondRequest, Pond } from '@/types/pond';
 
 export interface FarmInfo {
   farmerName: string;
@@ -45,12 +49,26 @@ export interface InventoryItem {
 }
 
 interface FarmContextType {
+  // Trạng thái Động từ Backend (Giai đoạn 2)
+  farms: Farm[];
+  selectedFarm: Farm | null;
+  ponds: Pond[];
+  selectedPond: Pond | null;
+  isLoadingFarms: boolean;
+  isLoadingPonds: boolean;
+  farmError: string | null;
+  selectFarm: (farmId: string) => Promise<void>;
+  selectPond: (pondId: string) => void;
+  refreshFarmsAndPonds: () => Promise<void>;
+  createFarm: (data: CreateFarmRequest) => Promise<Farm>;
+  createPond: (data: CreatePondRequest) => Promise<Pond>;
+
+  // Dữ liệu cũ bảo lưu tương thích ngược (Giai đoạn 3 & 4)
   farmInfo: FarmInfo;
   updateFarmInfo: (info: Partial<FarmInfo>) => void;
   feedMeals: FeedingMeal[];
   updateFeedMeal: (id: string, updates: Partial<FeedingMeal>) => void;
   addExtraMeal: (kg: number, note: string) => void;
-  // Feeder states
   dispensedKg: number;
   targetKg: number;
   feederPaused: boolean;
@@ -62,11 +80,9 @@ interface FarmContextType {
   setFeederRadius: (r: '3m' | '6m' | '9m') => void;
   triggerEmergencyStop: () => void;
   resetEmergencyStop: () => void;
-  // Inventory states
   inventory: InventoryItem[];
   dispenseFeedBag: (itemId: string, kg?: number) => void;
   addInventoryItem: (item: Omit<InventoryItem, 'id'>) => void;
-  // Tray / Water monitoring
   appetiteLevel: 'weak' | 'strong' | 'skip';
   setAppetiteLevel: (level: 'weak' | 'strong' | 'skip') => void;
   trayCleanPercent: number;
@@ -74,7 +90,7 @@ interface FarmContextType {
   scanTray: () => Promise<void>;
 }
 
-const initialFarm: FarmInfo = {
+const initialFarmInfo: FarmInfo = {
   farmerName: 'Nguyễn Văn Ba',
   farmName: 'Trại Tôm Ba Đầm (Ao 02)',
   location: 'Bến Tre - Huyện Ba Tri',
@@ -202,22 +218,219 @@ const initialInventory: InventoryItem[] = [
 const FarmContext = createContext<FarmContextType | undefined>(undefined);
 
 export function FarmProvider({ children }: { children: React.ReactNode }) {
-  const [farmInfo, setFarmInfo] = useState<FarmInfo>(initialFarm);
+  const { isAuthenticated, isOfflineMode, user } = useAuth();
+
+  // Trạng thái Farm & Pond động từ Backend
+  const [farms, setFarms] = useState<Farm[]>([]);
+  const [selectedFarm, setSelectedFarm] = useState<Farm | null>(null);
+  const [ponds, setPonds] = useState<Pond[]>([]);
+  const [selectedPond, setSelectedPond] = useState<Pond | null>(null);
+  const [isLoadingFarms, setIsLoadingFarms] = useState<boolean>(true);
+  const [isLoadingPonds, setIsLoadingPonds] = useState<boolean>(false);
+  const [farmError, setFarmError] = useState<string | null>(null);
+
+  // Trạng thái bảo lưu tương thích ngược cho các màn hình khác
+  const [farmInfo, setFarmInfo] = useState<FarmInfo>(initialFarmInfo);
   const [feedMeals, setFeedMeals] = useState<FeedingMeal[]>(initialMeals);
   const [inventory, setInventory] = useState<InventoryItem[]>(initialInventory);
-
-  // Live feeder states
   const [dispensedKg, setDispensedKg] = useState<number>(18.5);
   const targetKg = 25.0;
   const [feederPaused, setFeederPaused] = useState<boolean>(false);
   const [feederRadius, setFeederRadius] = useState<'3m' | '6m' | '9m'>('6m');
   const [hopperKg, setHopperKg] = useState<number>(120);
   const [isEmergencyStopped, setIsEmergencyStopped] = useState<boolean>(false);
-
-  // Tray monitoring states
   const [appetiteLevel, setAppetiteLevel] = useState<'weak' | 'strong' | 'skip'>('strong');
   const [trayCleanPercent, setTrayCleanPercent] = useState<number>(90);
   const [isScanningTray, setIsScanningTray] = useState<boolean>(false);
+
+  /**
+   * Tải toàn bộ danh sách Farms và Ponds khi người dùng đăng nhập
+   */
+  const loadFarmsAndPonds = useCallback(async () => {
+    if (!isAuthenticated) {
+      setFarms([]);
+      setSelectedFarm(null);
+      setPonds([]);
+      setSelectedPond(null);
+      setIsLoadingFarms(false);
+      setIsLoadingPonds(false);
+      return;
+    }
+
+    if (isOfflineMode) {
+      const offlineFarm: Farm = {
+        id: 'farm-offline-1',
+        ownerId: user?.id || 'usr_offline',
+        name: 'Trại Tôm Bờ Ao Ngoại Tuyến',
+        address: 'Khu vực mất sóng viễn thông',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      const offlinePond: Pond = {
+        id: 'pond-offline-1',
+        farmId: 'farm-offline-1',
+        code: 'AO-OFFLINE',
+        name: 'Ao Ngoại Tuyến (Bộ nhớ đệm)',
+        areaM2: 2500,
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      setFarms([offlineFarm]);
+      setSelectedFarm(offlineFarm);
+      setPonds([offlinePond]);
+      setSelectedPond(offlinePond);
+      setFarmInfo((prev) => ({
+        ...prev,
+        farmName: offlineFarm.name,
+        location: offlineFarm.address || prev.location,
+        selectedPond: offlinePond.name,
+      }));
+      setIsLoadingFarms(false);
+      setIsLoadingPonds(false);
+      return;
+    }
+
+    setIsLoadingFarms(true);
+    setFarmError(null);
+    try {
+      const farmsList = await farmPondService.getFarms();
+      setFarms(farmsList);
+
+      if (farmsList.length > 0) {
+        // Tìm farm đã lưu trong Storage hoặc chọn Farm đầu tiên
+        const savedFarmId = await farmPondService.getSelectedFarmId();
+        const currentFarm = farmsList.find((f) => f.id === savedFarmId) || farmsList[0];
+        setSelectedFarm(currentFarm);
+        await farmPondService.setSelectedFarmId(currentFarm.id);
+
+        // Tải danh sách Ao của Farm đang chọn
+        setIsLoadingPonds(true);
+        try {
+          const pondsList = await farmPondService.getPondsByFarm(currentFarm.id);
+          setPonds(pondsList);
+
+          if (pondsList.length > 0) {
+            const savedPondId = await farmPondService.getSelectedPondId();
+            const currentPond = pondsList.find((p) => p.id === savedPondId) || pondsList[0];
+            setSelectedPond(currentPond);
+            await farmPondService.setSelectedPondId(currentPond.id);
+
+            // Đồng bộ sang farmInfo tương thích ngược
+            setFarmInfo((prev) => ({
+              ...prev,
+              farmName: currentFarm.name,
+              location: currentFarm.address || prev.location,
+              selectedPond: currentPond.name || currentPond.code,
+            }));
+          } else {
+            setSelectedPond(null);
+          }
+        } finally {
+          setIsLoadingPonds(false);
+        }
+      } else {
+        setSelectedFarm(null);
+        setPonds([]);
+        setSelectedPond(null);
+      }
+    } catch (err: any) {
+      setFarmError(err?.message || 'Không thể tải danh sách trang trại');
+    } finally {
+      setIsLoadingFarms(false);
+    }
+  }, [isAuthenticated, isOfflineMode, user]);
+
+  useEffect(() => {
+    loadFarmsAndPonds();
+  }, [loadFarmsAndPonds]);
+
+  /**
+   * Chọn Trang trại khác -> Tự động nạp danh sách ao tương ứng
+   */
+  const selectFarm = async (farmId: string) => {
+    const targetFarm = farms.find((f) => f.id === farmId);
+    if (!targetFarm) return;
+
+    setSelectedFarm(targetFarm);
+    await farmPondService.setSelectedFarmId(targetFarm.id);
+
+    setIsLoadingPonds(true);
+    try {
+      const pondsList = await farmPondService.getPondsByFarm(targetFarm.id);
+      setPonds(pondsList);
+
+      if (pondsList.length > 0) {
+        const firstPond = pondsList[0];
+        setSelectedPond(firstPond);
+        await farmPondService.setSelectedPondId(firstPond.id);
+
+        setFarmInfo((prev) => ({
+          ...prev,
+          farmName: targetFarm.name,
+          location: targetFarm.address || prev.location,
+          selectedPond: firstPond.name || firstPond.code,
+        }));
+      } else {
+        setSelectedPond(null);
+      }
+    } catch (err: any) {
+      setFarmError(err?.message || 'Không thể tải danh sách ao nuôi');
+    } finally {
+      setIsLoadingPonds(false);
+    }
+  };
+
+  /**
+   * Chọn Ao nuôi khác -> Cập nhật và lưu Storage
+   */
+  const selectPond = (pondId: string) => {
+    const targetPond = ponds.find((p) => p.id === pondId);
+    if (!targetPond) return;
+
+    setSelectedPond(targetPond);
+    farmPondService.setSelectedPondId(targetPond.id);
+
+    setFarmInfo((prev) => ({
+      ...prev,
+      selectedPond: targetPond.name || targetPond.code,
+    }));
+  };
+
+  /**
+   * Làm mới dữ liệu trang trại và ao nuôi từ server
+   */
+  const refreshFarmsAndPonds = async () => {
+    await loadFarmsAndPonds();
+  };
+
+  /**
+   * Tạo trang trại mới
+   */
+  const createFarm = async (data: CreateFarmRequest): Promise<Farm> => {
+    const newFarm = await farmPondService.createFarm(data);
+    setFarms((prev) => [newFarm, ...prev]);
+    await selectFarm(newFarm.id);
+    return newFarm;
+  };
+
+  /**
+   * Tạo ao nuôi mới trong trang trại hiện tại
+   */
+  const createPond = async (data: CreatePondRequest): Promise<Pond> => {
+    if (!selectedFarm) {
+      throw new Error('Vui lòng chọn trang trại trước khi thêm ao');
+    }
+    const newPond = await farmPondService.createPond(selectedFarm.id, data);
+    setPonds((prev) => [newPond, ...prev]);
+    selectPond(newPond.id);
+    return newPond;
+  };
+
+  // ==========================================
+  // Các hàm cũ bảo lưu tương thích ngược
+  // ==========================================
 
   const updateFarmInfo = (info: Partial<FarmInfo>) => {
     setFarmInfo((prev) => ({ ...prev, ...info }));
@@ -322,6 +535,18 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
   return (
     <FarmContext.Provider
       value={{
+        farms,
+        selectedFarm,
+        ponds,
+        selectedPond,
+        isLoadingFarms,
+        isLoadingPonds,
+        farmError,
+        selectFarm,
+        selectPond,
+        refreshFarmsAndPonds,
+        createFarm,
+        createPond,
         farmInfo,
         updateFarmInfo,
         feedMeals,
