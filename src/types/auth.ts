@@ -1,3 +1,5 @@
+export type UserRole = 'admin' | 'farmer';
+
 export interface User {
   id: string;
   email: string;
@@ -5,11 +7,25 @@ export interface User {
   phone?: string;
   fullName: string;
   name?: string;
-  role: 'admin' | 'farmer' | string;
+  role: UserRole | string;
   isActive: boolean;
   avatarUrl?: string;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface FarmerCheckResponse {
+  message: string;
+}
+
+export interface VerifyResetOtpRequest {
+  identifier: string;
+  otp: string;
+}
+
+export interface VerifyResetOtpResponse {
+  valid: boolean;
+  message: string;
 }
 
 export interface UpdateProfileRequest {

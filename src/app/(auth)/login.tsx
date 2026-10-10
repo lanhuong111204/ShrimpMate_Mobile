@@ -24,25 +24,51 @@ export default function ScreenLogin() {
   const insets = useSafeAreaInsets();
   const colors = useTheme();
   const router = useRouter();
-  const { login, forgotPassword, resetPassword, loginOffline, isLoading } = useAuth();
+  const {
+    login,
+    forgotPassword,
+    verifyResetOtp,
+    resendOtp,
+    resetPassword,
+    loginOffline,
+    isLoading,
+  } = useAuth();
 
-  // Login form state (call directly to backend, no mock data)
+  // Login form state
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
-  // Forgot password modal state
+  // Admin Forbidden Modal state
+  const [showAdminForbiddenModal, setShowAdminForbiddenModal] = useState(false);
+  const [adminForbiddenMsg, setAdminForbiddenMsg] = useState('');
+
+  // Forgot password modal state (3-step flow)
   const [showForgotModal, setShowForgotModal] = useState(false);
-  const [forgotStep, setForgotStep] = useState<1 | 2>(1);
+  const [forgotStep, setForgotStep] = useState<1 | 2 | 3>(1);
   const [forgotIdentifier, setForgotIdentifier] = useState('');
   const [forgotOtp, setForgotOtp] = useState<string[]>(['', '', '', '', '', '']);
   const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isForgotSubmitting, setIsForgotSubmitting] = useState(false);
   const [forgotError, setForgotError] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState(0);
 
-  // Primary Login Action - directly calls Backend API
+  // Countdown timer for resend OTP
+  React.useEffect(() => {
+    let timer: any;
+    if (countdown > 0) {
+      timer = setInterval(() => {
+        setCountdown((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [countdown]);
+
+  // Primary Login Action - directly calls Backend API with RBAC Guard
   const handleLogin = async () => {
     if (!identifier.trim()) {
       setLoginError('Vui lòng nhập Email hoặc Số điện thoại');
@@ -61,9 +87,17 @@ export default function ScreenLogin() {
       });
       router.replace('/(tabs)');
     } catch (err: any) {
-      setLoginError(
-        err?.message || 'Email/số điện thoại hoặc mật khẩu không đúng'
-      );
+      if (err?.isForbiddenAdmin || err?.statusCode === 403) {
+        setAdminForbiddenMsg(
+          err?.message ||
+          'Tài khoản Quản trị viên (Admin) không được phép truy cập ứng dụng di động ShrimpMate Mobile. Vui lòng đăng nhập trên hệ thống Admin Web Dashboard.'
+        );
+        setShowAdminForbiddenModal(true);
+      } else {
+        setLoginError(
+          err?.message || 'Email/số điện thoại hoặc mật khẩu không đúng'
+        );
+      }
     }
   };
 
@@ -117,6 +151,7 @@ export default function ScreenLogin() {
     try {
       const msg = await forgotPassword(forgotIdentifier.trim());
       setForgotStep(2);
+      setCountdown(60);
       Alert.alert(
         'Đã Gửi Mã Xác Thực',
         msg || 'Mã OTP 6 chữ số đã được gửi qua Email/SMS của bạn.'
@@ -128,15 +163,56 @@ export default function ScreenLogin() {
     }
   };
 
-  // Forgot Password: Step 2 - Reset with OTP & New Password
-  const handleConfirmResetPassword = async () => {
+  // Forgot Password: Resend OTP
+  const handleResendOtp = async () => {
+    if (countdown > 0 || isForgotSubmitting) return;
+
+    setForgotError(null);
+    setIsForgotSubmitting(true);
+    try {
+      const msg = await resendOtp(forgotIdentifier.trim());
+      setCountdown(60);
+      Alert.alert('Đã Gửi Lại OTP', msg || 'Mã OTP mới đã được gửi thành công.');
+    } catch (err: any) {
+      setForgotError(err?.message || 'Không thể gửi lại mã xác thực lúc này');
+    } finally {
+      setIsForgotSubmitting(false);
+    }
+  };
+
+  // Forgot Password: Step 2 - Verify OTP (Pre-validation)
+  const handleVerifyOtp = async () => {
     const otpCode = forgotOtp.join('');
     if (otpCode.length < 6) {
       setForgotError('Vui lòng nhập đủ 6 chữ số mã OTP');
       return;
     }
+
+    setForgotError(null);
+    setIsForgotSubmitting(true);
+    try {
+      await verifyResetOtp({
+        identifier: forgotIdentifier.trim(),
+        otp: otpCode,
+      });
+      // OTP hợp lệ -> chuyển sang Step 3 để nhập mật khẩu mới
+      setForgotStep(3);
+    } catch (err: any) {
+      setForgotError(err?.message || 'Mã OTP không chính xác hoặc đã hết hạn');
+    } finally {
+      setIsForgotSubmitting(false);
+    }
+  };
+
+  // Forgot Password: Step 3 - Reset with New Password
+  const handleConfirmResetPassword = async () => {
+    const otpCode = forgotOtp.join('');
     if (newPassword.length < 8) {
       setForgotError('Mật khẩu mới phải có ít nhất 8 ký tự');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setForgotError('Mật khẩu nhập lại không khớp');
       return;
     }
 
@@ -152,11 +228,11 @@ export default function ScreenLogin() {
       setPassword(newPassword);
       setIdentifier(forgotIdentifier.trim());
       Alert.alert(
-        'Thành Công',
-        msg || 'Đặt lại mật khẩu thành công! Bạn có thể đăng nhập ngay với mật khẩu mới.'
+        'Đổi Mật Khẩu Thành Công',
+        msg || 'Mật khẩu đã được cập nhật thành công! Vui lòng đăng nhập với mật khẩu mới.'
       );
     } catch (err: any) {
-      setForgotError(err?.message || 'Mã OTP không hợp lệ hoặc đã hết hạn');
+      setForgotError(err?.message || 'Không thể đặt lại mật khẩu. Vui lòng thử lại');
     } finally {
       setIsForgotSubmitting(false);
     }
@@ -450,7 +526,85 @@ export default function ScreenLogin() {
         </View>
       </ScrollView>
 
-      {/* MODAL: QUÊN MẬT KHẨU (FORGOT PASSWORD) */}
+      {/* MODAL: CHẶN QUYỀN QUẢN TRỊ VIÊN (ADMIN FORBIDDEN DIALOG) */}
+      <Modal
+        visible={showAdminForbiddenModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowAdminForbiddenModal(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { borderColor: '#BA1A1A', borderWidth: 1 }]}>
+            <View style={{ alignItems: 'center', gap: 12, paddingVertical: 10 }}>
+              <View
+                style={{
+                  width: 60,
+                  height: 60,
+                  borderRadius: 30,
+                  backgroundColor: '#FFDAD6',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}>
+                <MaterialIcons name="admin-panel-settings" size={36} color="#BA1A1A" />
+              </View>
+              <Text
+                style={{
+                  fontSize: 17,
+                  fontWeight: '900',
+                  color: '#BA1A1A',
+                  textAlign: 'center',
+                  letterSpacing: -0.2,
+                }}>
+                TÀI KHOẢN QUẢN TRỊ VIÊN
+              </Text>
+              <Text
+                style={{
+                  fontSize: 13,
+                  color: '#41484D',
+                  lineHeight: 20,
+                  textAlign: 'center',
+                }}>
+                {adminForbiddenMsg ||
+                  'Ứng dụng di động ShrimpMate Mobile chỉ dành riêng cho Người nuôi (Farmer). Tài khoản Quản trị viên không được phép đăng nhập trên thiết bị di động.'}
+              </Text>
+              <View
+                style={{
+                  width: '100%',
+                  backgroundColor: '#EFF4FF',
+                  padding: 12,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: '#D4E3FF',
+                  gap: 4,
+                }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <MaterialIcons name="info" size={16} color="#0058BE" />
+                  <Text style={{ fontSize: 12, fontWeight: '800', color: '#0058BE' }}>
+                    Hướng dẫn truy cập Admin:
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 12, color: '#2B4865', lineHeight: 18 }}>
+                  Vui lòng đăng nhập trên máy tính bằng trình duyệt web tới hệ thống Quản trị Web (Admin Web Dashboard) để quản lý cấu hình ao nuôi và thiết bị toàn hệ thống.
+                </Text>
+              </View>
+            </View>
+
+            <Pressable
+              onPress={() => {
+                setShowAdminForbiddenModal(false);
+                setPassword('');
+              }}
+              style={({ pressed }) => [
+                styles.btnPrimaryModal,
+                { backgroundColor: '#0B1C30', opacity: pressed ? 0.85 : 1 },
+              ]}>
+              <MaterialIcons name="logout" size={20} color="#FFFFFF" />
+              <Text style={styles.btnPrimaryModalText}>ĐÃ HIỂU & ĐÓNG</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL: QUÊN MẬT KHẨU (FORGOT PASSWORD 3 BƯỚC CHUẨN) */}
       <Modal
         visible={showForgotModal}
         transparent
@@ -460,11 +614,16 @@ export default function ScreenLogin() {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
+            {/* Header Modal */}
             <View style={styles.modalHeader}>
               <View style={styles.modalHeaderTitleGroup}>
                 <MaterialIcons name="lock-reset" size={24} color="#EA580C" />
                 <Text style={styles.modalTitle}>
-                  {forgotStep === 1 ? 'QUÊN MẬT KHẨU' : 'ĐẶT LẠI MẬT KHẨU'}
+                  {forgotStep === 1
+                    ? 'QUÊN MẬT KHẨU (BƯỚC 1/3)'
+                    : forgotStep === 2
+                    ? 'XÁC THỰC MÃ OTP (BƯỚC 2/3)'
+                    : 'ĐẶT MẬT KHẨU MỚI (BƯỚC 3/3)'}
                 </Text>
               </View>
               <Pressable
@@ -474,7 +633,45 @@ export default function ScreenLogin() {
               </Pressable>
             </View>
 
-            {forgotStep === 1 ? (
+            {/* Stepper Indicator */}
+            <View style={styles.stepperContainer}>
+              <View
+                style={[
+                  styles.stepBadge,
+                  forgotStep >= 1 ? styles.stepBadgeActive : styles.stepBadgeInactive,
+                ]}>
+                <Text style={styles.stepBadgeText}>1</Text>
+              </View>
+              <View
+                style={[
+                  styles.stepLine,
+                  forgotStep >= 2 ? styles.stepLineActive : styles.stepLineInactive,
+                ]}
+              />
+              <View
+                style={[
+                  styles.stepBadge,
+                  forgotStep >= 2 ? styles.stepBadgeActive : styles.stepBadgeInactive,
+                ]}>
+                <Text style={styles.stepBadgeText}>2</Text>
+              </View>
+              <View
+                style={[
+                  styles.stepLine,
+                  forgotStep >= 3 ? styles.stepLineActive : styles.stepLineInactive,
+                ]}
+              />
+              <View
+                style={[
+                  styles.stepBadge,
+                  forgotStep >= 3 ? styles.stepBadgeActive : styles.stepBadgeInactive,
+                ]}>
+                <Text style={styles.stepBadgeText}>3</Text>
+              </View>
+            </View>
+
+            {/* BƯỚC 1: NHẬP SĐT HOẶC EMAIL */}
+            {forgotStep === 1 && (
               <View style={styles.modalBody}>
                 <Text style={styles.modalDesc}>
                   Nhập Email hoặc Số điện thoại tài khoản của bà con. Hệ thống sẽ gửi mã xác thực OTP 6 số.
@@ -492,7 +689,7 @@ export default function ScreenLogin() {
                         setForgotError(null);
                       }}
                       autoCapitalize="none"
-                      placeholder="operator@shrimpmate.local hoặc 0901000003"
+                      placeholder="farmer@shrimpmate.local hoặc 0901000002"
                       placeholderTextColor="#8C7164"
                     />
                   </View>
@@ -522,14 +719,18 @@ export default function ScreenLogin() {
                   )}
                 </Pressable>
               </View>
-            ) : (
+            )}
+
+            {/* BƯỚC 2: XÁC THỰC MÃ OTP */}
+            {forgotStep === 2 && (
               <View style={styles.modalBody}>
                 <Text style={styles.modalDesc}>
-                  Đã gửi mã OTP 6 số về: <Text style={{ fontWeight: '800', color: '#0B1C30' }}>{forgotIdentifier}</Text>
+                  Mã OTP 6 số đã gửi tới:{' '}
+                  <Text style={{ fontWeight: '800', color: '#0B1C30' }}>{forgotIdentifier}</Text>
                 </Text>
 
                 {/* 6-Digit OTP Input */}
-                <View style={{ marginVertical: 8 }}>
+                <View style={{ marginVertical: 4 }}>
                   <Text style={[styles.inputLabel, { marginBottom: 6 }]}>MÃ XÁC THỰC 6 CHỮ SỐ</Text>
                   <OtpInput
                     length={6}
@@ -541,6 +742,61 @@ export default function ScreenLogin() {
                     hasError={!!forgotError}
                   />
                 </View>
+
+                {/* Resend OTP Row */}
+                <View style={styles.resendRow}>
+                  {countdown > 0 ? (
+                    <Text style={styles.resendWaitText}>
+                      Gửi lại mã sau <Text style={{ fontWeight: '800', color: '#EA580C' }}>{countdown}s</Text>
+                    </Text>
+                  ) : (
+                    <Pressable
+                      onPress={handleResendOtp}
+                      disabled={isForgotSubmitting}
+                      style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}>
+                      <Text style={styles.resendActiveText}>Chưa nhận được mã? Gửi lại OTP</Text>
+                    </Pressable>
+                  )}
+                </View>
+
+                {forgotError && (
+                  <View style={styles.errorRow}>
+                    <MaterialIcons name="error-outline" size={16} color="#BA1A1A" />
+                    <Text style={[styles.errorText, { color: '#BA1A1A' }]}>{forgotError}</Text>
+                  </View>
+                )}
+
+                <View style={styles.forgotActionsRow}>
+                  <Pressable
+                    onPress={() => setForgotStep(1)}
+                    style={styles.btnBackModal}>
+                    <Text style={styles.btnBackModalText}>Quay lại</Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={handleVerifyOtp}
+                    disabled={isForgotSubmitting}
+                    style={({ pressed }) => [
+                      styles.btnConfirmModal,
+                      { opacity: pressed || isForgotSubmitting ? 0.85 : 1 },
+                    ]}>
+                    {isForgotSubmitting ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <Text style={styles.btnConfirmModalText}>XÁC THỰC MÃ</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
+            {/* BƯỚC 3: NHẬP MẬT KHẨU MỚI */}
+            {forgotStep === 3 && (
+              <View style={styles.modalBody}>
+                <Text style={styles.modalDesc}>
+                  Mã OTP hợp lệ! Hãy nhập mật khẩu mới cho tài khoản{' '}
+                  <Text style={{ fontWeight: '800', color: '#0B1C30' }}>{forgotIdentifier}</Text>.
+                </Text>
 
                 {/* New Password Input */}
                 <View style={styles.inputGroup}>
@@ -570,6 +826,34 @@ export default function ScreenLogin() {
                   </View>
                 </View>
 
+                {/* Confirm New Password Input */}
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>XÁC NHẬN MẬT KHẨU MỚI</Text>
+                  <View style={styles.inputRow}>
+                    <MaterialIcons name="lock-outline" size={20} color="#8C7164" />
+                    <TextInput
+                      style={styles.inputField}
+                      value={confirmNewPassword}
+                      onChangeText={(val) => {
+                        setConfirmNewPassword(val);
+                        setForgotError(null);
+                      }}
+                      secureTextEntry={!showConfirmPassword}
+                      placeholder="Nhập lại mật khẩu mới..."
+                      placeholderTextColor="#8C7164"
+                    />
+                    <Pressable
+                      onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                      style={{ padding: 4 }}>
+                      <MaterialIcons
+                        name={showConfirmPassword ? 'visibility-off' : 'visibility'}
+                        size={20}
+                        color="#8C7164"
+                      />
+                    </Pressable>
+                  </View>
+                </View>
+
                 {forgotError && (
                   <View style={styles.errorRow}>
                     <MaterialIcons name="error-outline" size={16} color="#BA1A1A" />
@@ -579,7 +863,7 @@ export default function ScreenLogin() {
 
                 <View style={styles.forgotActionsRow}>
                   <Pressable
-                    onPress={() => setForgotStep(1)}
+                    onPress={() => setForgotStep(2)}
                     style={styles.btnBackModal}>
                     <Text style={styles.btnBackModalText}>Quay lại</Text>
                   </Pressable>
@@ -594,7 +878,7 @@ export default function ScreenLogin() {
                     {isForgotSubmitting ? (
                       <ActivityIndicator color="#FFFFFF" size="small" />
                     ) : (
-                      <Text style={styles.btnConfirmModalText}>ĐẶT LẠI MẬT KHẨU</Text>
+                      <Text style={styles.btnConfirmModalText}>ĐỔI MẬT KHẨU</Text>
                     )}
                   </Pressable>
                 </View>
@@ -984,5 +1268,58 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '900',
     color: '#FFFFFF',
+  },
+  stepperContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+    marginBottom: 6,
+  },
+  stepBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepBadgeActive: {
+    backgroundColor: '#EA580C',
+  },
+  stepBadgeInactive: {
+    backgroundColor: '#D1D5DB',
+  },
+  stepBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  stepLine: {
+    flex: 1,
+    height: 2,
+    maxWidth: 40,
+    marginHorizontal: 4,
+  },
+  stepLineActive: {
+    backgroundColor: '#EA580C',
+  },
+  stepLineInactive: {
+    backgroundColor: '#D1D5DB',
+  },
+  resendRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+  },
+  resendWaitText: {
+    fontSize: 12,
+    color: '#584237',
+    fontWeight: '600',
+  },
+  resendActiveText: {
+    fontSize: 12,
+    color: '#EA580C',
+    fontWeight: '800',
+    textDecorationLine: 'underline',
   },
 });
