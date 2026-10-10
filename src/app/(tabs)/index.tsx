@@ -18,7 +18,7 @@ import { useFarm } from '@/context/farm-context';
 export default function ScreenFeedingLog() {
   const colors = useTheme();
   const router = useRouter();
-  const { farmInfo, feedMeals, updateFeedMeal, addExtraMeal } = useFarm();
+  const { farmInfo, selectedPond, selectedFarm, feedMeals, updateFeedMeal, addExtraMeal } = useFarm();
 
   const [showExtraModal, setShowExtraModal] = useState(false);
   const [extraKg, setExtraKg] = useState('5');
@@ -61,6 +61,11 @@ export default function ScreenFeedingLog() {
     setShowExtraModal(false);
   };
 
+  const pondDisplayName = selectedPond?.name || selectedPond?.code || farmInfo.selectedPond;
+  const pondAreaDesc = selectedPond?.areaM2
+    ? `${selectedPond.areaM2.toLocaleString('vi-VN')} m² • ${selectedPond.status === 'maintenance' ? 'Đang bảo dưỡng' : 'Ao đang vận hành'}`
+    : 'Tôm thẻ chân trắng • 42 ngày tuổi';
+
   return (
     <View style={[styles.screen, { backgroundColor: colors.surface }]}>
       <AppHeader subtitle="Lịch Cữ Nuôi Tôm" />
@@ -83,12 +88,12 @@ export default function ScreenFeedingLog() {
               <View style={{ flex: 1 }}>
                 <View style={styles.pondNameRow}>
                   <Text style={[styles.pondNameText, { color: colors.onSurface }]}>
-                    {farmInfo.selectedPond}
+                    {pondDisplayName}
                   </Text>
                   <MaterialIcons name="arrow-forward-ios" size={13} color={colors.onSurfaceVariant} />
                 </View>
                 <Text style={[styles.pondSubText, { color: colors.secondary }]}>
-                  Tôm thẻ chân trắng • 42 ngày tuổi
+                  {pondAreaDesc}
                 </Text>
               </View>
             </View>
