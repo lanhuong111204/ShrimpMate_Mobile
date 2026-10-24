@@ -1,105 +1,62 @@
-﻿import React, { useState } from 'react';
+import React from 'react';
 import {
   StyleSheet,
   Text,
   View,
-  TextInput,
   Pressable,
   ScrollView,
   Alert,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/use-theme';
-import { useAuth } from '@/context/auth-context';
 
-const VIETNAM_PHONE_REGEX = /^0(3|5|7|8|9)\d{8}$/;
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-export default function ScreenRegister() {
+export default function ScreenRegisterGuide() {
   const insets = useSafeAreaInsets();
   const colors = useTheme();
   const router = useRouter();
-  const { register, isLoading } = useAuth();
 
-  // Form states
-  const [fullName, setFullName] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [agreedToTerms, setAgreedToTerms] = useState(true);
-
-  const [formError, setFormError] = useState<string | null>(null);
-
-  const validateForm = (): boolean => {
-    if (!fullName.trim() || fullName.trim().length < 2) {
-      setFormError('Họ và tên phải có ít nhất 2 ký tự');
-      return false;
-    }
-    const cleanPhone = phoneNumber.replace(/\D/g, '');
-    if (!cleanPhone || !VIETNAM_PHONE_REGEX.test(cleanPhone)) {
-      setFormError('Số điện thoại không hợp lệ (10 chữ số, bắt đầu bằng 03, 05, 07, 08, 09)');
-      return false;
-    }
-    if (!email.trim() || !EMAIL_REGEX.test(email.trim())) {
-      setFormError('Địa chỉ email không hợp lệ (ví dụ: name@example.com)');
-      return false;
-    }
-    if (!password || password.length < 8) {
-      setFormError('Mật khẩu bảo mật phải có ít nhất 8 ký tự');
-      return false;
-    }
-    if (password !== confirmPassword) {
-      setFormError('Mật khẩu xác nhận không khớp. Vui lòng kiểm tra lại');
-      return false;
-    }
-    if (!agreedToTerms) {
-      setFormError('Vui lòng xác nhận đồng ý với Quy chế hoạt động & Tiêu chuẩn VietGAP');
-      return false;
-    }
-    return true;
+  const handleCallHotline = () => {
+    Alert.alert(
+      'Tổng Đài Hỗ Trợ Kỹ Sư 24/7',
+      'Đang kết nối tới tổng đài hỗ trợ tài khoản và kết nối ao nuôi ShrimpMate: 1800 6868 (Miễn hoàn toàn cước gọi)',
+      [
+        { text: 'Hủy', style: 'cancel' },
+        {
+          text: 'Gọi 1800 6868',
+          onPress: () => {
+            Linking.openURL('tel:18006868').catch(() => {
+              Alert.alert('Thông Báo', 'Không thể tự động quay số trên thiết bị này. Vui lòng gọi 1800 6868.');
+            });
+          },
+        },
+      ]
+    );
   };
 
-  const handleRegister = async () => {
-    setFormError(null);
-    if (!validateForm()) return;
-
-    try {
-      await register({
-        fullName: fullName.trim(),
-        email: email.trim().toLowerCase(),
-        phoneNumber: phoneNumber.replace(/\D/g, ''),
-        password,
-      });
-
-      Alert.alert(
-        'Đăng Ký Thành Công! 🎉',
-        `Chào mừng ${fullName.trim()} đã gia nhập mạng lưới trại nuôi ShrimpMate. Hãy tiếp tục thiết lập hồ sơ vuông tôm của bạn.`,
-        [
-          {
-            text: 'Thiết Lập Trại Nuôi (Bước 2)',
-            onPress: () => router.replace('/(auth)/farm-setup'),
+  const handleOpenManagerWeb = () => {
+    Alert.alert(
+      'Hệ Thống Quản Lý Trang Trại (Manager Web)',
+      'Hệ thống Web dành riêng cho Chủ đầm / Quản lý trang trại để đăng ký tài khoản mới, tạo danh sách ao nuôi và phân công kỹ thuật viên.',
+      [
+        { text: 'Đóng', style: 'cancel' },
+        {
+          text: 'Tìm Hiểu Thêm',
+          onPress: () => {
+            Alert.alert(
+              'Cổng Quản Lý Web',
+              'Vui lòng truy cập trên trình duyệt máy tính theo địa chỉ cổng Quản lý đầm tôm của trang trại bạn.'
+            );
           },
-        ]
-      );
-    } catch (err: any) {
-      setFormError(
-        err?.message || 'Đăng ký tài khoản không thành công. Vui lòng kiểm tra lại thông tin.'
-      );
-    }
+        },
+      ]
+    );
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={[styles.screen, { backgroundColor: colors.surface }]}>
+    <View style={[styles.screen, { backgroundColor: colors.surface }]}>
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
@@ -108,288 +65,240 @@ export default function ScreenRegister() {
             paddingBottom: Math.max(insets.bottom, 24) + 20,
           },
         ]}
-        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}>
         <View style={styles.container}>
           {/* Header Brand Bar */}
           <View style={styles.brandBar}>
-            <View style={styles.brandLeft}>
-              <View style={styles.logoBox}>
-                <MaterialIcons name="water-drop" size={26} color="#EA580C" />
-              </View>
-              <View>
-                <Text style={[styles.brandName, { color: colors.onSurface }]}>ShrimpMate</Text>
-                <Text style={[styles.brandTagline, { color: colors.onSurfaceVariant }]}>
-                  Hệ Thống Quản Trị Đầm Nuôi
-                </Text>
-              </View>
-            </View>
-
-            <View
-              style={[
-                styles.stepBadge,
-                { backgroundColor: colors.surfaceContainerLowest, borderColor: '#F97316' },
-              ]}>
-              <Text style={styles.stepBadgeText}>Bước 1/2</Text>
-            </View>
-          </View>
-
-          {/* Intro Card */}
-          <View
-            style={[
-              styles.introCard,
-              {
-                backgroundColor: colors.surfaceContainerLowest,
-                borderColor: colors.outlineVariant + '40',
-              },
-            ]}>
-            <View style={styles.introHeader}>
-              <View style={styles.avatarWrapper}>
-                <MaterialIcons name="person-add" size={28} color="#EA580C" />
-              </View>
-              <View style={styles.introInfo}>
-                <Text style={[styles.introTitle, { color: colors.onSurface }]}>
-                  Đăng ký tài khoản mới
-                </Text>
-                <Text style={[styles.introSub, { color: colors.onSurfaceVariant }]}>
-                  Tạo hồ sơ kỹ sư vận hành hoặc chủ trang trại nuôi tôm
-                </Text>
-              </View>
-            </View>
-
-            <View
-              style={[
-                styles.badgesRow,
+            <Pressable
+              onPress={() => router.replace('/(auth)/login')}
+              style={({ pressed }) => [
+                styles.btnBack,
                 {
                   backgroundColor: colors.surfaceContainerLow,
                   borderColor: colors.outlineVariant + '40',
+                  opacity: pressed ? 0.8 : 1,
                 },
               ]}>
-              <View style={styles.badgeItem}>
-                <MaterialIcons name="verified-user" size={16} color="#006E2D" />
-                <Text style={[styles.badgeText, { color: colors.onSurface }]}>Chuẩn VietGAP</Text>
+              <MaterialIcons name="arrow-back" size={22} color={colors.onSurface} />
+            </Pressable>
+
+            <View style={styles.brandCenter}>
+              <View style={styles.logoBox}>
+                <MaterialIcons name="water-drop" size={22} color="#EA580C" />
               </View>
-              <Text style={{ color: colors.outlineVariant }}>|</Text>
-              <View style={styles.badgeItem}>
-                <MaterialIcons name="memory" size={16} color="#006398" />
-                <Text style={[styles.badgeText, { color: colors.onSurface }]}>Kết nối IoT Bờ Ao</Text>
-              </View>
+              <Text style={[styles.brandName, { color: colors.onSurface }]}>ShrimpMate</Text>
+            </View>
+
+            <View style={{ width: 40 }} />
+          </View>
+
+          {/* Hero Banner */}
+          <View
+            style={[
+              styles.heroCard,
+              {
+                backgroundColor: colors.surfaceContainerLowest,
+                borderColor: '#FFDCC2',
+              },
+            ]}>
+            <View style={styles.heroAvatar}>
+              <MaterialIcons name="badge" size={32} color="#EA580C" />
+            </View>
+            <View style={{ alignItems: 'center', gap: 6 }}>
+              <Text style={[styles.heroTitle, { color: '#9A3412' }]}>
+                CẤP PHÁT TÀI KHOẢN BỜ AO
+              </Text>
+              <Text style={[styles.heroSub, { color: colors.onSurfaceVariant }]}>
+                Ứng dụng di động ShrimpMate Mobile dành riêng cho Người nuôi & Kỹ thuật viên vận hành ao nuôi (Farmer)
+              </Text>
             </View>
           </View>
 
-          {/* MAIN REGISTER FORM CARD */}
+          {/* RBAC Policy Notice Card */}
+          <View
+            style={[
+              styles.noticeCard,
+              {
+                backgroundColor: '#EFF6FF',
+                borderColor: '#BFDBFE',
+              },
+            ]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <MaterialIcons name="verified-user" size={20} color="#1D4ED8" />
+              <Text style={styles.noticeHeading}>Quy Định An Toàn Sinh Học & Phân Quyền</Text>
+            </View>
+            <Text style={styles.noticeBody}>
+              Để đảm bảo bảo mật dữ liệu vuông tôm và ngăn ngừa sai lệch cữ ăn,{' '}
+              <Text style={{ fontWeight: '800', color: '#1E40AF' }}>
+                Người nuôi không tự đăng ký tài khoản tự do trên điện thoại
+              </Text>
+              . Toàn bộ tài khoản Người nuôi được Quản lý đầm (Manager) tạo và phân công ao nuôi cụ thể.
+            </Text>
+          </View>
+
+          {/* 3 Steps Guide Section */}
           <View
             style={[
               styles.cardSection,
               {
                 backgroundColor: colors.surfaceContainerLowest,
-                borderColor: colors.outlineVariant + '50',
+                borderColor: colors.outlineVariant + '40',
               },
             ]}>
-            <Text style={[styles.formHeading, { color: colors.onSurface }]}>
-              THÔNG TIN TÀI KHOẢN KỸ SƯ
+            <Text style={[styles.sectionHeading, { color: colors.onSurface }]}>
+              3 BƯỚC NHẬN TÀI KHOẢN VẬN HÀNH
             </Text>
 
-            {/* Field 1: Full Name */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>HỌ VÀ TÊN KỸ SƯ / CHỦ TRẠI *</Text>
-              <View
-                style={[
-                  styles.inputRow,
-                  { backgroundColor: colors.surfaceContainerLow },
-                ]}>
-                <MaterialIcons name="person" size={20} color="#8C7164" />
-                <TextInput
-                  style={[styles.inputField, { color: colors.onSurface }]}
-                  value={fullName}
-                  onChangeText={(val) => {
-                    setFullName(val);
-                    setFormError(null);
-                  }}
-                  autoCapitalize="words"
-                  placeholder="Ví dụ: Nguyễn Văn Nam"
-                  placeholderTextColor="#8C7164"
-                />
+            {/* Step 1 */}
+            <View style={styles.stepItem}>
+              <View style={[styles.stepNumberBadge, { backgroundColor: '#EA580C' }]}>
+                <Text style={styles.stepNumberText}>1</Text>
+              </View>
+              <View style={styles.stepContent}>
+                <Text style={[styles.stepTitle, { color: colors.onSurface }]}>
+                  Liên hệ Quản lý trang trại của bạn
+                </Text>
+                <Text style={[styles.stepDesc, { color: colors.onSurfaceVariant }]}>
+                  Chủ đầm hoặc Kỹ sư quản lý (Manager) sẽ tạo hồ sơ của bạn trên hệ thống Quản lý Web và gán các ao nuôi bạn trực tiếp phụ trách.
+                </Text>
               </View>
             </View>
 
-            {/* Field 2: Phone Number */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>SỐ ĐIỆN THOẠI LIÊN HỆ *</Text>
-              <View
-                style={[
-                  styles.inputRow,
-                  { backgroundColor: colors.surfaceContainerLow },
-                ]}>
-                <MaterialIcons name="phone" size={20} color="#8C7164" />
-                <TextInput
-                  style={[styles.inputField, { color: colors.onSurface }]}
-                  value={phoneNumber}
-                  onChangeText={(val) => {
-                    setPhoneNumber(val);
-                    setFormError(null);
-                  }}
-                  keyboardType="phone-pad"
-                  maxLength={11}
-                  placeholder="Ví dụ: 0901234567"
-                  placeholderTextColor="#8C7164"
-                />
+            {/* Step 2 */}
+            <View style={styles.stepItem}>
+              <View style={[styles.stepNumberBadge, { backgroundColor: '#0284C7' }]}>
+                <Text style={styles.stepNumberText}>2</Text>
+              </View>
+              <View style={styles.stepContent}>
+                <Text style={[styles.stepTitle, { color: colors.onSurface }]}>
+                  Nhận thông tin đăng nhập tạm thời
+                </Text>
+                <Text style={[styles.stepDesc, { color: colors.onSurfaceVariant }]}>
+                  Quản lý sẽ bàn giao Email hoặc Số điện thoại đăng nhập kèm mật khẩu khởi tạo ban đầu cho bạn.
+                </Text>
               </View>
             </View>
 
-            {/* Field 3: Email */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>ĐỊA CHỈ EMAIL *</Text>
-              <View
-                style={[
-                  styles.inputRow,
-                  { backgroundColor: colors.surfaceContainerLow },
-                ]}>
-                <MaterialIcons name="mail" size={20} color="#8C7164" />
-                <TextInput
-                  style={[styles.inputField, { color: colors.onSurface }]}
-                  value={email}
-                  onChangeText={(val) => {
-                    setEmail(val);
-                    setFormError(null);
-                  }}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  placeholder="Ví dụ: nam.nguyen@shrimpmate.vn"
-                  placeholderTextColor="#8C7164"
-                />
+            {/* Step 3 */}
+            <View style={styles.stepItem}>
+              <View style={[styles.stepNumberBadge, { backgroundColor: '#16A34A' }]}>
+                <Text style={styles.stepNumberText}>3</Text>
+              </View>
+              <View style={styles.stepContent}>
+                <Text style={[styles.stepTitle, { color: colors.onSurface }]}>
+                  Đăng nhập & Đổi mật khẩu cá nhân
+                </Text>
+                <Text style={[styles.stepDesc, { color: colors.onSurfaceVariant }]}>
+                  Đăng nhập vào ứng dụng di động này. Hệ thống sẽ tự động yêu cầu bạn thiết lập mật khẩu bảo mật mới trong lần đầu tiên để kích hoạt tài khoản.
+                </Text>
               </View>
             </View>
+          </View>
 
-            {/* Field 4: Password */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>MẬT KHẨU (TỐI THIỂU 8 KÝ TỰ) *</Text>
-              <View
-                style={[
-                  styles.inputRow,
-                  { backgroundColor: colors.surfaceContainerLow },
-                ]}>
-                <MaterialIcons name="lock" size={20} color="#8C7164" />
-                <TextInput
-                  style={[styles.inputField, { color: colors.onSurface }]}
-                  value={password}
-                  onChangeText={(val) => {
-                    setPassword(val);
-                    setFormError(null);
-                  }}
-                  secureTextEntry={!showPassword}
-                  autoCapitalize="none"
-                  placeholder="Nhập mật khẩu..."
-                  placeholderTextColor="#8C7164"
-                />
-                <Pressable
-                  onPress={() => setShowPassword(!showPassword)}
-                  style={{ padding: 4 }}>
-                  <MaterialIcons
-                    name={showPassword ? 'visibility-off' : 'visibility'}
-                    size={20}
-                    color="#8C7164"
-                  />
-                </Pressable>
+          {/* For Farm Managers Card */}
+          <View
+            style={[
+              styles.managerCard,
+              {
+                backgroundColor: colors.surfaceContainerLowest,
+                borderColor: colors.outlineVariant + '40',
+              },
+            ]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={styles.managerIconBox}>
+                <MaterialIcons name="business" size={24} color="#0058BE" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.managerCardTitle, { color: colors.onSurface }]}>
+                  Bạn là Chủ đầm / Quản lý trang trại?
+                </Text>
+                <Text style={[styles.managerCardSub, { color: colors.onSurfaceVariant }]}>
+                  Đăng ký tài khoản Quản lý & thiết lập vuông tôm trên Web
+                </Text>
               </View>
             </View>
-
-            {/* Field 5: Confirm Password */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>XÁC NHẬN MẬT KHẨU *</Text>
-              <View
-                style={[
-                  styles.inputRow,
-                  { backgroundColor: colors.surfaceContainerLow },
-                ]}>
-                <MaterialIcons name="verified-user" size={20} color="#8C7164" />
-                <TextInput
-                  style={[styles.inputField, { color: colors.onSurface }]}
-                  value={confirmPassword}
-                  onChangeText={(val) => {
-                    setConfirmPassword(val);
-                    setFormError(null);
-                  }}
-                  secureTextEntry={!showConfirmPassword}
-                  autoCapitalize="none"
-                  placeholder="Nhập lại mật khẩu..."
-                  placeholderTextColor="#8C7164"
-                />
-                <Pressable
-                  onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                  style={{ padding: 4 }}>
-                  <MaterialIcons
-                    name={showConfirmPassword ? 'visibility-off' : 'visibility'}
-                    size={20}
-                    color="#8C7164"
-                  />
-                </Pressable>
-              </View>
-            </View>
-
-            {/* Terms & Agreement Checkbox */}
             <Pressable
-              onPress={() => setAgreedToTerms(!agreedToTerms)}
-              style={styles.termsRow}>
-              <MaterialIcons
-                name={agreedToTerms ? 'check-box' : 'check-box-outline-blank'}
-                size={22}
-                color={agreedToTerms ? '#EA580C' : '#8C7164'}
-              />
-              <Text style={[styles.termsText, { color: colors.onSurfaceVariant }]}>
-                Tôi đồng ý với{' '}
-                <Text style={{ fontWeight: '800', color: '#EA580C' }}>
-                  Quy chế vận hành & Tiêu chuẩn VietGAP 2026
-                </Text>{' '}
-                của hệ thống ShrimpMate.
+              onPress={handleOpenManagerWeb}
+              style={({ pressed }) => [
+                styles.btnManagerWeb,
+                { opacity: pressed ? 0.85 : 1 },
+              ]}>
+              <MaterialIcons name="open-in-browser" size={18} color="#0058BE" />
+              <Text style={styles.btnManagerWebText}>HƯỚNG DẪN DÀNH CHO QUẢN LÝ</Text>
+            </Pressable>
+          </View>
+
+          {/* Hotline Support Card */}
+          <View
+            style={[
+              styles.hotlineCard,
+              {
+                backgroundColor: colors.inverseSurface,
+              },
+            ]}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <View style={styles.hotlineTagRow}>
+                <View style={[styles.signalDot, { backgroundColor: colors.secondaryFixed }]} />
+                <Text style={[styles.hotlineTag, { color: colors.inverseOnSurface }]}>
+                  TỔNG ĐÀI TRỢ GIÚP 24/7
+                </Text>
+              </View>
+              <Text style={[styles.hotlineTitle, { color: colors.inverseOnSurface }]}>
+                Cần hỗ trợ nhận tài khoản ao nuôi?
+              </Text>
+              <Text style={[styles.hotlineSub, { color: colors.primaryFixed }]}>
+                Kỹ sư ShrimpMate túc trực miễn cước gọi
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={handleCallHotline}
+              style={({ pressed }) => [
+                styles.hotlineCallBtn,
+                { backgroundColor: colors.secondaryFixed, opacity: pressed ? 0.9 : 1 },
+              ]}>
+              <MaterialIcons name="call" size={18} color={colors.onSecondaryFixed} />
+              <Text style={[styles.hotlineCallNum, { color: colors.onSecondaryFixed }]}>
+                1800 6868
               </Text>
             </Pressable>
-
-            {/* Error Banner */}
-            {formError && (
-              <View style={styles.errorRow}>
-                <MaterialIcons name="error-outline" size={18} color="#BA1A1A" />
-                <Text style={[styles.errorText, { color: '#BA1A1A' }]}>{formError}</Text>
-              </View>
-            )}
-
-            {/* Submit Button */}
-            <Pressable
-              onPress={handleRegister}
-              disabled={isLoading}
-              style={({ pressed }) => [
-                styles.btnRegister,
-                {
-                  backgroundColor: '#EA580C',
-                  opacity: pressed || isLoading ? 0.85 : 1,
-                },
-              ]}>
-              {isLoading ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
-              ) : (
-                <>
-                  <MaterialIcons name="person-add-alt-1" size={22} color="#FFFFFF" />
-                  <Text style={styles.btnRegisterText}>ĐĂNG KÝ TÀI KHOẢN BỜ AO</Text>
-                </>
-              )}
-            </Pressable>
           </View>
 
-          {/* Navigation to Login */}
-          <View style={styles.loginLinkRow}>
-            <Text style={[styles.loginPromptText, { color: colors.onSurfaceVariant }]}>
-              Đã có tài khoản kỹ sư?
-            </Text>
+          {/* Primary CTA Buttons */}
+          <View style={{ gap: 12, marginTop: 8 }}>
             <Pressable
               onPress={() => router.replace('/(auth)/login')}
-              style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1, padding: 4 }]}>
-              <Text style={styles.loginLinkText}>Đăng nhập ngay</Text>
+              style={({ pressed }) => [
+                styles.btnPrimary,
+                { backgroundColor: '#EA580C', opacity: pressed ? 0.85 : 1 },
+              ]}>
+              <MaterialIcons name="login" size={20} color="#FFFFFF" />
+              <Text style={styles.btnPrimaryText}>ĐÃ CÓ TÀI KHOẢN • ĐĂNG NHẬP NGAY</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={handleCallHotline}
+              style={({ pressed }) => [
+                styles.btnSecondary,
+                {
+                  backgroundColor: colors.surfaceContainerLowest,
+                  borderColor: colors.outlineVariant + '60',
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}>
+              <MaterialIcons name="support-agent" size={20} color="#EA580C" />
+              <Text style={[styles.btnSecondaryText, { color: '#EA580C' }]}>
+                GỌI TỔNG ĐÀI HỖ TRỢ MIỄN PHÍ
+              </Text>
             </Pressable>
           </View>
+
+          <Text style={[styles.footerText, { color: colors.onSurfaceVariant }]}>
+            Hệ thống Quản lý Bờ ao Thông minh ShrimpMate • Chuẩn VietGAP
+          </Text>
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -408,196 +317,246 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 8,
-  },
-  brandLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  logoBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFE8D6',
-    borderWidth: 1.5,
-    borderColor: '#F97316',
-  },
-  brandName: {
-    fontSize: 20,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  brandTagline: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  stepBadge: {
-    paddingHorizontal: 10,
     paddingVertical: 4,
+  },
+  btnBack: {
+    width: 40,
+    height: 40,
     borderRadius: 12,
     borderWidth: 1,
-  },
-  stepBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#EA580C',
-  },
-  introCard: {
-    padding: 16,
-    borderRadius: 20,
-    borderWidth: 1,
-    gap: 12,
-  },
-  introHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  avatarWrapper: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#FFDBCA',
-    borderWidth: 1.5,
-    borderColor: '#EA580C',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  introInfo: {
-    flex: 1,
-  },
-  introTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  introSub: {
-    fontSize: 12,
-    marginTop: 2,
-    lineHeight: 16,
-  },
-  badgesRow: {
+  brandCenter: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-around',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
+    gap: 8,
+  },
+  logoBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#FFEDD5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  brandName: {
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: -0.3,
+  },
+  heroCard: {
+    borderRadius: 20,
+    borderWidth: 1.5,
+    padding: 20,
+    alignItems: 'center',
+    gap: 12,
+    elevation: 1,
+    shadowColor: '#EA580C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+  },
+  heroAvatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FFEDD5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroTitle: {
+    fontSize: 17,
+    fontWeight: '900',
+    letterSpacing: -0.2,
+    textAlign: 'center',
+  },
+  heroSub: {
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+  },
+  noticeCard: {
+    borderRadius: 16,
     borderWidth: 1,
+    padding: 16,
+    gap: 8,
   },
-  badgeItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+  noticeHeading: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1D4ED8',
   },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '700',
+  noticeBody: {
+    fontSize: 13,
+    color: '#1E3A8A',
+    lineHeight: 20,
   },
   cardSection: {
-    padding: 18,
     borderRadius: 20,
     borderWidth: 1,
-    gap: 14,
-    elevation: 2,
+    padding: 18,
+    gap: 16,
+    elevation: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 3,
+    shadowRadius: 4,
   },
-  formHeading: {
-    fontSize: 12,
+  sectionHeading: {
+    fontSize: 13,
     fontWeight: '900',
     letterSpacing: 0.5,
   },
-  inputGroup: {
-    gap: 6,
+  stepItem: {
+    flexDirection: 'row',
+    gap: 14,
+    alignItems: 'flex-start',
   },
-  inputLabel: {
-    fontSize: 11,
+  stepNumberBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  stepNumberText: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  stepContent: {
+    flex: 1,
+    gap: 4,
+  },
+  stepTitle: {
+    fontSize: 14,
     fontWeight: '800',
-    color: '#0B1C30',
+    lineHeight: 20,
+  },
+  stepDesc: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  managerCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 16,
+    gap: 12,
+  },
+  managerIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  managerCardTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  managerCardSub: {
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  btnManagerWeb: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  btnManagerWebText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#0058BE',
     letterSpacing: 0.3,
   },
-  inputRow: {
+  hotlineCard: {
+    borderRadius: 18,
+    padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    height: 50,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#D0D8E8',
-    paddingHorizontal: 12,
-    gap: 8,
+    justifyContent: 'space-between',
+    gap: 12,
   },
-  inputField: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  termsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 4,
-  },
-  termsText: {
-    flex: 1,
-    fontSize: 11,
-    lineHeight: 16,
-    fontWeight: '500',
-  },
-  errorRow: {
+  hotlineTagRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    padding: 10,
-    borderRadius: 10,
-    backgroundColor: '#FFEDEC',
-    borderWidth: 1,
-    borderColor: '#F8B4B4',
   },
-  errorText: {
-    flex: 1,
+  signalDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  hotlineTag: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  hotlineTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  hotlineSub: {
+    fontSize: 11,
+  },
+  hotlineCallBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+  },
+  hotlineCallNum: {
     fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 16,
+    fontWeight: '900',
   },
-  btnRegister: {
+  btnPrimary: {
     height: 52,
     borderRadius: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    elevation: 3,
-    shadowColor: '#000',
+    elevation: 2,
+    shadowColor: '#EA580C',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.15,
     shadowRadius: 4,
-    marginTop: 4,
   },
-  btnRegisterText: {
-    color: '#FFFFFF',
-    fontSize: 14,
+  btnPrimaryText: {
+    fontSize: 13,
     fontWeight: '900',
-    letterSpacing: 0.5,
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
   },
-  loginLinkRow: {
+  btnSecondary: {
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 8,
+    gap: 8,
   },
-  loginPromptText: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  loginLinkText: {
-    fontSize: 13,
+  btnSecondaryText: {
+    fontSize: 12,
     fontWeight: '800',
-    color: '#EA580C',
+    letterSpacing: 0.3,
+  },
+  footerText: {
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 8,
   },
 });

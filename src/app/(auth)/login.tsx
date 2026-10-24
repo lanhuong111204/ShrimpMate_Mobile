@@ -26,6 +26,7 @@ export default function ScreenLogin() {
   const router = useRouter();
   const {
     login,
+    firstTimeChangePassword,
     forgotPassword,
     verifyResetOtp,
     resendOtp,
@@ -40,9 +41,19 @@ export default function ScreenLogin() {
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
-  // Admin Forbidden Modal state
-  const [showAdminForbiddenModal, setShowAdminForbiddenModal] = useState(false);
-  const [adminForbiddenMsg, setAdminForbiddenMsg] = useState('');
+  // RBAC Role Forbidden Modal state (Admin & Manager)
+  const [showForbiddenModal, setShowForbiddenModal] = useState(false);
+  const [forbiddenRole, setForbiddenRole] = useState<'admin' | 'manager'>('admin');
+  const [forbiddenMsg, setForbiddenMsg] = useState('');
+
+  // First-time Password Change Modal state (Farmer được Manager cấp tài khoản)
+  const [showFirstLoginModal, setShowFirstLoginModal] = useState(false);
+  const [firstNewPassword, setFirstNewPassword] = useState('');
+  const [firstConfirmPassword, setFirstConfirmPassword] = useState('');
+  const [showFirstNewPassword, setShowFirstNewPassword] = useState(false);
+  const [showFirstConfirmPassword, setShowFirstConfirmPassword] = useState(false);
+  const [firstPasswordError, setFirstPasswordError] = useState<string | null>(null);
+  const [isFirstPasswordSubmitting, setIsFirstPasswordSubmitting] = useState(false);
 
   // Forgot password modal state (3-step flow)
   const [showForgotModal, setShowForgotModal] = useState(false);
@@ -81,23 +92,73 @@ export default function ScreenLogin() {
 
     setLoginError(null);
     try {
-      await login({
+      const loggedUser = await login({
         identifier: identifier.trim(),
         password,
       });
+
+      // Nếu tài khoản yêu cầu đổi mật khẩu lần đầu (được cấp bởi Quản lý)
+      if (loggedUser?.isFirstLogin) {
+        setShowFirstLoginModal(true);
+        return;
+      }
+
       router.replace('/(tabs)');
     } catch (err: any) {
-      if (err?.isForbiddenAdmin || err?.statusCode === 403) {
-        setAdminForbiddenMsg(
+      if (err?.isForbiddenManager || err?.forbiddenRole === 'manager') {
+        setForbiddenRole('manager');
+        setForbiddenMsg(
+          err?.message ||
+          'Tài khoản Quản lý đầm (Manager) vui lòng đăng nhập trên hệ thống Manager Web App để cấu hình ao và phân công nhân sự.'
+        );
+        setShowForbiddenModal(true);
+      } else if (err?.isForbiddenAdmin || err?.forbiddenRole === 'admin' || err?.statusCode === 403) {
+        setForbiddenRole('admin');
+        setForbiddenMsg(
           err?.message ||
           'Tài khoản Quản trị viên (Admin) không được phép truy cập ứng dụng di động ShrimpMate Mobile. Vui lòng đăng nhập trên hệ thống Admin Web Dashboard.'
         );
-        setShowAdminForbiddenModal(true);
+        setShowForbiddenModal(true);
       } else {
         setLoginError(
           err?.message || 'Email/số điện thoại hoặc mật khẩu không đúng'
         );
       }
+    }
+  };
+
+  // First-time Password Change Action
+  const handleFirstTimePasswordSubmit = async () => {
+    if (!firstNewPassword || firstNewPassword.length < 8) {
+      setFirstPasswordError('Mật khẩu mới phải có tối thiểu 8 ký tự');
+      return;
+    }
+    if (firstNewPassword !== firstConfirmPassword) {
+      setFirstPasswordError('Mật khẩu xác nhận không khớp');
+      return;
+    }
+
+    setIsFirstPasswordSubmitting(true);
+    setFirstPasswordError(null);
+    try {
+      await firstTimeChangePassword(firstNewPassword, password);
+      setShowFirstLoginModal(false);
+      Alert.alert(
+        'Kích Hoạt Tài Khoản Thành Công! 🎉',
+        'Mật khẩu của bạn đã được cập nhật an toàn. Chào mừng bạn bắt đầu ca vận hành ao nuôi.',
+        [
+          {
+            text: 'Bắt Đầu Vận Hành',
+            onPress: () => router.replace('/(tabs)'),
+          },
+        ]
+      );
+    } catch (err: any) {
+      setFirstPasswordError(
+        err?.message || 'Không thể đổi mật khẩu lúc này. Vui lòng thử lại sau.'
+      );
+    } finally {
+      setIsFirstPasswordSubmitting(false);
     }
   };
 
@@ -526,35 +587,48 @@ export default function ScreenLogin() {
         </View>
       </ScrollView>
 
-      {/* MODAL: CHẶN QUYỀN QUẢN TRỊ VIÊN (ADMIN FORBIDDEN DIALOG) */}
+      {/* MODAL: CHẶN QUYỀN TRUY CẬP (RBAC FORBIDDEN MODAL: ADMIN & MANAGER) */}
       <Modal
-        visible={showAdminForbiddenModal}
+        visible={showForbiddenModal}
         transparent
         animationType="fade"
-        onRequestClose={() => setShowAdminForbiddenModal(false)}>
+        onRequestClose={() => setShowForbiddenModal(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, { borderColor: '#BA1A1A', borderWidth: 1 }]}>
+          <View
+            style={[
+              styles.modalCard,
+              {
+                borderColor: forbiddenRole === 'manager' ? '#0058BE' : '#BA1A1A',
+                borderWidth: 1.5,
+              },
+            ]}>
             <View style={{ alignItems: 'center', gap: 12, paddingVertical: 10 }}>
               <View
                 style={{
-                  width: 60,
-                  height: 60,
-                  borderRadius: 30,
-                  backgroundColor: '#FFDAD6',
+                  width: 64,
+                  height: 64,
+                  borderRadius: 32,
+                  backgroundColor: forbiddenRole === 'manager' ? '#D4E3FF' : '#FFDAD6',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}>
-                <MaterialIcons name="admin-panel-settings" size={36} color="#BA1A1A" />
+                <MaterialIcons
+                  name={forbiddenRole === 'manager' ? 'business' : 'admin-panel-settings'}
+                  size={36}
+                  color={forbiddenRole === 'manager' ? '#0058BE' : '#BA1A1A'}
+                />
               </View>
               <Text
                 style={{
                   fontSize: 17,
                   fontWeight: '900',
-                  color: '#BA1A1A',
+                  color: forbiddenRole === 'manager' ? '#0058BE' : '#BA1A1A',
                   textAlign: 'center',
                   letterSpacing: -0.2,
                 }}>
-                TÀI KHOẢN QUẢN TRỊ VIÊN
+                {forbiddenRole === 'manager'
+                  ? 'TÀI KHOẢN QUẢN LÝ ĐẦM (MANAGER)'
+                  : 'TÀI KHOẢN QUẢN TRỊ VIÊN (ADMIN)'}
               </Text>
               <Text
                 style={{
@@ -563,8 +637,10 @@ export default function ScreenLogin() {
                   lineHeight: 20,
                   textAlign: 'center',
                 }}>
-                {adminForbiddenMsg ||
-                  'Ứng dụng di động ShrimpMate Mobile chỉ dành riêng cho Người nuôi (Farmer). Tài khoản Quản trị viên không được phép đăng nhập trên thiết bị di động.'}
+                {forbiddenMsg ||
+                  (forbiddenRole === 'manager'
+                    ? 'Ứng dụng di động ShrimpMate Mobile chỉ dành riêng cho Người nuôi (Farmer). Tài khoản Quản lý đầm (Manager) vui lòng sử dụng Manager Web App để quản trị trang trại và phân công nhân sự.'
+                    : 'Ứng dụng di động ShrimpMate Mobile chỉ dành riêng cho Người nuôi (Farmer). Tài khoản Quản trị viên không được phép đăng nhập trên thiết bị di động.')}
               </Text>
               <View
                 style={{
@@ -579,26 +655,157 @@ export default function ScreenLogin() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <MaterialIcons name="info" size={16} color="#0058BE" />
                   <Text style={{ fontSize: 12, fontWeight: '800', color: '#0058BE' }}>
-                    Hướng dẫn truy cập Admin:
+                    {forbiddenRole === 'manager'
+                      ? 'Hướng dẫn truy cập Manager Web App:'
+                      : 'Hướng dẫn truy cập Admin Web Dashboard:'}
                   </Text>
                 </View>
                 <Text style={{ fontSize: 12, color: '#2B4865', lineHeight: 18 }}>
-                  Vui lòng đăng nhập trên máy tính bằng trình duyệt web tới hệ thống Quản trị Web (Admin Web Dashboard) để quản lý cấu hình ao nuôi và thiết bị toàn hệ thống.
+                  {forbiddenRole === 'manager'
+                    ? 'Vui lòng truy cập trên máy tính hoặc trình duyệt web tới cổng Quản lý Trang trại (Manager Web App) để quản lý danh sách ao nuôi, xem camera AI và phân công bờ ao cho kỹ thuật viên.'
+                    : 'Vui lòng đăng nhập trên máy tính bằng trình duyệt web tới hệ thống Quản trị Web (Admin Web Dashboard) để quản lý cấu hình ao nuôi và thiết bị toàn hệ thống.'}
                 </Text>
               </View>
             </View>
 
             <Pressable
               onPress={() => {
-                setShowAdminForbiddenModal(false);
+                setShowForbiddenModal(false);
                 setPassword('');
               }}
               style={({ pressed }) => [
                 styles.btnPrimaryModal,
-                { backgroundColor: '#0B1C30', opacity: pressed ? 0.85 : 1 },
+                {
+                  backgroundColor: forbiddenRole === 'manager' ? '#0058BE' : '#0B1C30',
+                  opacity: pressed ? 0.85 : 1,
+                },
               ]}>
-              <MaterialIcons name="logout" size={20} color="#FFFFFF" />
+              <MaterialIcons name="check" size={20} color="#FFFFFF" />
               <Text style={styles.btnPrimaryModalText}>ĐÃ HIỂU & ĐÓNG</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL: ĐỔI MẬT KHẨU LẦN ĐẦU (FIRST-TIME LOGIN PASSWORD MODAL) */}
+      <Modal
+        visible={showFirstLoginModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {}}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { borderColor: '#EA580C', borderWidth: 1.5 }]}>
+            <View style={{ alignItems: 'center', gap: 8, paddingBottom: 6 }}>
+              <View
+                style={{
+                  width: 60,
+                  height: 60,
+                  borderRadius: 30,
+                  backgroundColor: '#FFEDD5',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}>
+                <MaterialIcons name="lock-reset" size={34} color="#EA580C" />
+              </View>
+              <Text
+                style={{
+                  fontSize: 17,
+                  fontWeight: '900',
+                  color: '#9A3412',
+                  textAlign: 'center',
+                  letterSpacing: -0.2,
+                }}>
+                ĐỔI MẬT KHẨU LẦN ĐẦU
+              </Text>
+              <Text
+                style={{
+                  fontSize: 12,
+                  color: '#7C2D12',
+                  lineHeight: 18,
+                  textAlign: 'center',
+                }}>
+                Tài khoản của bạn được cấp bởi Quản lý đầm. Để bảo mật thông tin vuông tôm, vui lòng thiết lập mật khẩu cá nhân mới trước khi bắt đầu.
+              </Text>
+            </View>
+
+            {/* Input 1: Mật khẩu mới */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>MẬT KHẨU MỚI (TỐI THIỂU 8 KÝ TỰ) *</Text>
+              <View style={styles.inputRow}>
+                <MaterialIcons name="lock" size={20} color="#8C7164" />
+                <TextInput
+                  style={styles.inputField}
+                  value={firstNewPassword}
+                  onChangeText={(val) => {
+                    setFirstNewPassword(val);
+                    setFirstPasswordError(null);
+                  }}
+                  secureTextEntry={!showFirstNewPassword}
+                  placeholder="Nhập mật khẩu mới..."
+                  placeholderTextColor="#8C7164"
+                />
+                <Pressable
+                  onPress={() => setShowFirstNewPassword(!showFirstNewPassword)}
+                  style={{ padding: 4 }}>
+                  <MaterialIcons
+                    name={showFirstNewPassword ? 'visibility-off' : 'visibility'}
+                    size={20}
+                    color="#8C7164"
+                  />
+                </Pressable>
+              </View>
+            </View>
+
+            {/* Input 2: Xác nhận mật khẩu mới */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>XÁC NHẬN MẬT KHẨU MỚI *</Text>
+              <View style={styles.inputRow}>
+                <MaterialIcons name="lock-outline" size={20} color="#8C7164" />
+                <TextInput
+                  style={styles.inputField}
+                  value={firstConfirmPassword}
+                  onChangeText={(val) => {
+                    setFirstConfirmPassword(val);
+                    setFirstPasswordError(null);
+                  }}
+                  secureTextEntry={!showFirstConfirmPassword}
+                  placeholder="Nhập lại mật khẩu mới..."
+                  placeholderTextColor="#8C7164"
+                />
+                <Pressable
+                  onPress={() => setShowFirstConfirmPassword(!showFirstConfirmPassword)}
+                  style={{ padding: 4 }}>
+                  <MaterialIcons
+                    name={showFirstConfirmPassword ? 'visibility-off' : 'visibility'}
+                    size={20}
+                    color="#8C7164"
+                  />
+                </Pressable>
+              </View>
+            </View>
+
+            {firstPasswordError && (
+              <View style={styles.errorRow}>
+                <MaterialIcons name="error-outline" size={16} color="#BA1A1A" />
+                <Text style={[styles.errorText, { color: '#BA1A1A' }]}>{firstPasswordError}</Text>
+              </View>
+            )}
+
+            <Pressable
+              onPress={handleFirstTimePasswordSubmit}
+              disabled={isFirstPasswordSubmitting}
+              style={({ pressed }) => [
+                styles.btnPrimaryModal,
+                { backgroundColor: '#EA580C', opacity: pressed || isFirstPasswordSubmitting ? 0.85 : 1 },
+              ]}>
+              {isFirstPasswordSubmitting ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <MaterialIcons name="security" size={20} color="#FFFFFF" />
+                  <Text style={styles.btnPrimaryModalText}>CẬP NHẬT MẬT KHẨU</Text>
+                </>
+              )}
             </Pressable>
           </View>
         </View>

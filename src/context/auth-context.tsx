@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { apiClient } from '@/api/client';
 import { authService } from '@/api/services/auth.service';
+import { AppConfig } from '@/constants/config';
+import { Storage } from '@/utils/storage';
 import {
   ChangePasswordRequest,
   LoginRequest,
@@ -17,13 +19,15 @@ interface AuthContextValue {
   isLoading: boolean;
   isAuthenticated: boolean;
   isOfflineMode: boolean;
-  login: (credentials: LoginRequest) => Promise<void>;
+  isFirstLogin: boolean;
+  login: (credentials: LoginRequest) => Promise<User>;
   register: (data: RegisterRequest) => Promise<void>;
   forgotPassword: (identifier: string) => Promise<string>;
   verifyResetOtp: (data: VerifyResetOtpRequest) => Promise<VerifyResetOtpResponse>;
   resendOtp: (identifier: string) => Promise<string>;
   resetPassword: (data: ResetPasswordRequest) => Promise<string>;
   changePassword: (data: ChangePasswordRequest) => Promise<string>;
+  firstTimeChangePassword: (newPassword: string, currentPassword?: string) => Promise<string>;
   updateProfile: (data: UpdateProfileRequest) => Promise<User>;
   refreshUserProfile: () => Promise<User | null>;
   loginOffline: () => Promise<void>;
@@ -46,8 +50,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const currentUser = await authService.getMe();
         if (currentUser) {
-          // Cold boot guard: Nếu user là admin thì lập tức hủy phiên
-          if (currentUser.role === 'admin') {
+          // Cold boot guard: Nếu user là admin hoặc manager thì lập tức hủy phiên
+          if (currentUser.role === 'admin' || currentUser.role === 'manager') {
             await authService.logout();
             setUser(null);
           } else {
@@ -86,21 +90,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
     try {
       const response = await authService.login(credentials);
-      
-      // RBAC Guard: Bắt buộc gọi GET /auth/farmer-check để kiểm tra quyền Người nuôi
-      try {
-        await authService.checkFarmerRole();
-        setUser(response.user);
-      } catch (checkErr: any) {
-        // Nếu trả về 403 Forbidden (tài khoản Admin)
+      const userRole = response.user?.role;
+
+      // 1. Chặn sớm theo vai trò trả về trong user profile
+      if (userRole === 'admin') {
         await authService.logout();
         setUser(null);
         const forbiddenError = new Error(
-          checkErr?.message ||
-          'Tài khoản Quản trị viên (Admin) không được phép truy cập ứng dụng di động. Vui lòng sử dụng Web Dashboard.'
+          'Tài khoản Quản trị viên (Admin) không được phép truy cập ứng dụng di động. Vui lòng sử dụng Admin Web Dashboard.'
         );
         (forbiddenError as any).statusCode = 403;
+        (forbiddenError as any).forbiddenRole = 'admin';
         (forbiddenError as any).isForbiddenAdmin = true;
+        throw forbiddenError;
+      }
+
+      if (userRole === 'manager') {
+        await authService.logout();
+        setUser(null);
+        const forbiddenError = new Error(
+          'Tài khoản Quản lý đầm (Manager) vui lòng đăng nhập trên hệ thống Web Manager để cấu hình ao và phân công nhân sự.'
+        );
+        (forbiddenError as any).statusCode = 403;
+        (forbiddenError as any).forbiddenRole = 'manager';
+        (forbiddenError as any).isForbiddenManager = true;
+        throw forbiddenError;
+      }
+
+      // 2. RBAC Guard: Bắt buộc gọi GET /auth/farmer-check để kiểm tra quyền Người nuôi
+      try {
+        await authService.checkFarmerRole();
+        setUser(response.user);
+        return response.user;
+      } catch (checkErr: any) {
+        // Nếu trả về 403 Forbidden
+        await authService.logout();
+        setUser(null);
+        const isManager = userRole === 'manager' || checkErr?.role === 'manager';
+        const forbiddenError = new Error(
+          checkErr?.message ||
+          (isManager
+            ? 'Tài khoản Quản lý đầm (Manager) vui lòng đăng nhập trên hệ thống Web Manager để quản lý ao nuôi và phân công công nhân.'
+            : 'Tài khoản Quản trị viên (Admin) không được phép truy cập ứng dụng di động. Vui lòng sử dụng Web Dashboard.')
+        );
+        (forbiddenError as any).statusCode = 403;
+        (forbiddenError as any).forbiddenRole = isManager ? 'manager' : 'admin';
+        (forbiddenError as any).isForbiddenAdmin = !isManager;
+        (forbiddenError as any).isForbiddenManager = isManager;
         throw forbiddenError;
       }
     } finally {
@@ -141,6 +177,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const changePassword = async (data: ChangePasswordRequest): Promise<string> => {
     const res = await authService.changePassword(data);
     return res.message;
+  };
+
+  const firstTimeChangePassword = async (
+    newPassword: string,
+    currentPassword?: string
+  ): Promise<string> => {
+    setIsLoading(true);
+    try {
+      const res = await authService.firstTimeChangePassword({
+        currentPassword,
+        newPassword,
+      });
+      if (user) {
+        const updatedUser: User = {
+          ...user,
+          isFirstLogin: false,
+        };
+        setUser(updatedUser);
+        await Storage.setJSON(AppConfig.storageKeys.userData, updatedUser);
+      }
+      return res.message || 'Đổi mật khẩu lần đầu thành công';
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const updateProfile = async (data: UpdateProfileRequest): Promise<User> => {
@@ -188,6 +248,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         isAuthenticated: !!user,
         isOfflineMode: user?.role === 'guest_offline',
+        isFirstLogin: !!user?.isFirstLogin,
         login,
         register,
         forgotPassword,
@@ -195,6 +256,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         resendOtp,
         resetPassword,
         changePassword,
+        firstTimeChangePassword,
         updateProfile,
         refreshUserProfile,
         loginOffline,
