@@ -6,18 +6,27 @@ import {
   ScrollView,
   Pressable,
   Alert,
+  Modal,
+  TextInput,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/use-theme';
 import { AppHeader } from '@/components/common/app-header';
 import { useFarm } from '@/context/farm-context';
+import { EvaluateSafetyResponse } from '@/types/safety-rule';
 
 export default function ScreenLiveFeeder() {
   const colors = useTheme();
   const {
     selectedPond,
-    selectedFarm,
     farmInfo,
+    latestTelemetry,
+    feederDevice,
+    lastSafetyEvaluation,
+    evaluateSafetyBeforeFeed,
+    triggerQuickFeed,
     dispensedKg,
     targetKg,
     feederPaused,
@@ -26,12 +35,20 @@ export default function ScreenLiveFeeder() {
     hopperKg,
     isEmergencyStopped,
     toggleFeederPause,
-    addFeederKg,
     triggerEmergencyStop,
     resetEmergencyStop,
+    isRefreshingPondData,
+    refreshPondOperationalData,
   } = useFarm();
 
   const [testThrowTimer, setTestThrowTimer] = useState<number | null>(null);
+
+  // Quick Feed Modal State (UC012 + UC018 Safety Rule Engine)
+  const [showQuickFeedModal, setShowQuickFeedModal] = useState(false);
+  const [quickFeedKg, setQuickFeedKg] = useState('5.0');
+  const [safetyPreview, setSafetyPreview] = useState<EvaluateSafetyResponse | null>(null);
+  const [isEvaluatingSafety, setIsEvaluatingSafety] = useState(false);
+  const [isTriggeringFeed, setIsTriggeringFeed] = useState(false);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | null = null;
@@ -48,6 +65,71 @@ export default function ScreenLiveFeeder() {
     };
   }, [testThrowTimer]);
 
+  const handleOpenQuickFeedModal = async (defaultKg = '5.0') => {
+    setQuickFeedKg(defaultKg);
+    setShowQuickFeedModal(true);
+    const numKg = parseFloat(defaultKg) || 5.0;
+    setIsEvaluatingSafety(true);
+    try {
+      const res = await evaluateSafetyBeforeFeed(numKg);
+      setSafetyPreview(res);
+    } finally {
+      setIsEvaluatingSafety(false);
+    }
+  };
+
+  const handleReEvaluateSafety = async (textVal: string) => {
+    setQuickFeedKg(textVal);
+    const numKg = parseFloat(textVal);
+    if (!isNaN(numKg) && numKg > 0) {
+      setIsEvaluatingSafety(true);
+      try {
+        const res = await evaluateSafetyBeforeFeed(numKg);
+        setSafetyPreview(res);
+      } finally {
+        setIsEvaluatingSafety(false);
+      }
+    }
+  };
+
+  const handleConfirmQuickFeed = async () => {
+    const numKg = parseFloat(quickFeedKg);
+    if (isNaN(numKg) || numKg <= 0) {
+      Alert.alert('Lỗi', 'Vui lòng nhập khối lượng thức ăn hợp lệ (> 0 kg)');
+      return;
+    }
+
+    setIsTriggeringFeed(true);
+    try {
+      const result = await triggerQuickFeed(numKg, 'manual');
+      setSafetyPreview(result.evaluation);
+
+      if (!result.success || result.evaluation.decision === 'blocked') {
+        Alert.alert(
+          '⛔ BỊ CHẶN BỞI SAFETY RULE ENGINE',
+          result.evaluation.reasons.join('\n') ||
+            'Chỉ số nước hiện tại không an toàn để xả thức ăn.'
+        );
+        return;
+      }
+
+      setShowQuickFeedModal(false);
+      if (result.evaluation.decision === 'adjusted') {
+        Alert.alert(
+          '⚠️ ĐÃ ĐIỀU CHỈNH KHẨU PHẦN AN TOÀN',
+          `${result.evaluation.reasons.join('\n')}\n\nMáy cho ăn đang rải ${result.evaluation.allowedAmountKg} kg qua MQTT.`
+        );
+      } else {
+        Alert.alert(
+          '✓ Đã Phát Lệnh Xả Cám',
+          `Đã kiểm duyệt an toàn (Allowed) và kích hoạt máy cho ăn xả ${numKg} kg cám!`
+        );
+      }
+    } finally {
+      setIsTriggeringFeed(false);
+    }
+  };
+
   const handleStartTestThrow = () => {
     if (isEmergencyStopped) {
       Alert.alert('Cảnh Báo', 'Máy đang ở trạng thái Dừng Khẩn Cấp. Vui lòng khôi phục trước khi phun thử!');
@@ -57,8 +139,13 @@ export default function ScreenLiveFeeder() {
     Alert.alert('Đang Phun Thử', 'Bắt đầu chu kỳ phun thử 10 giây kiểm tra góc văng cám...');
   };
 
-  const percent = Math.round((dispensedKg / targetKg) * 100);
+  const percent = targetKg > 0 ? Math.min(100, Math.round((dispensedKg / targetKg) * 100)) : 0;
   const hopperPercent = Math.round((hopperKg / 150) * 100);
+
+  const currentDecision = safetyPreview?.decision || lastSafetyEvaluation?.decision || 'allowed';
+  const isFeedBlocked = isEmergencyStopped || currentDecision === 'blocked';
+  const doVal = latestTelemetry?.dissolvedOxygenMgL ?? farmInfo.dissolvedOxygen;
+  const phVal = latestTelemetry?.ph ?? farmInfo.ph;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.surface }]}>
@@ -66,41 +153,88 @@ export default function ScreenLiveFeeder() {
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshingPondData}
+            onRefresh={refreshPondOperationalData}
+            colors={['#EA580C']}
+            tintColor="#EA580C"
+          />
+        }>
         <View style={styles.container}>
-          {/* Safety Interlock Banner */}
+          {/* Safety Rule Engine Interlock Banner (Quy tắc 2) */}
           <View
             style={[
               styles.safetyBanner,
               {
-                backgroundColor: isEmergencyStopped ? '#FFDAD6' : '#E8F5E9',
-                borderColor: isEmergencyStopped ? '#BA1A1A' : '#7CF994',
+                backgroundColor: isEmergencyStopped || currentDecision === 'blocked'
+                  ? '#FFDAD6'
+                  : currentDecision === 'adjusted'
+                  ? '#FEF3C7'
+                  : '#E8F5E9',
+                borderColor: isEmergencyStopped || currentDecision === 'blocked'
+                  ? '#BA1A1A'
+                  : currentDecision === 'adjusted'
+                  ? '#F59E0B'
+                  : '#7CF994',
               },
             ]}>
             <View style={styles.safetyHeader}>
               <MaterialIcons
-                name={isEmergencyStopped ? 'dangerous' : 'verified-user'}
+                name={
+                  isEmergencyStopped || currentDecision === 'blocked'
+                    ? 'dangerous'
+                    : currentDecision === 'adjusted'
+                    ? 'warning-amber'
+                    : 'verified-user'
+                }
                 size={22}
-                color={isEmergencyStopped ? '#BA1A1A' : '#006E2D'}
+                color={
+                  isEmergencyStopped || currentDecision === 'blocked'
+                    ? '#BA1A1A'
+                    : currentDecision === 'adjusted'
+                    ? '#B45309'
+                    : '#006E2D'
+                }
               />
               <Text
                 style={[
                   styles.safetyTitle,
-                  { color: isEmergencyStopped ? '#93000A' : '#006E2D' },
+                  {
+                    color:
+                      isEmergencyStopped || currentDecision === 'blocked'
+                        ? '#93000A'
+                        : currentDecision === 'adjusted'
+                        ? '#92400E'
+                        : '#006E2D',
+                  },
                 ]}>
                 {isEmergencyStopped
-                  ? 'TRẠNG THÁI: DỪNG KHẨN CẤP ĐÃ KÍCH HOẠT'
-                  : `LIÊN ĐỘNG AN TOÀN (${selectedPond?.code || 'AO NUÔI'})`}
+                  ? 'TRẠNG THÁI: DỪNG KHẨN CẤP (EMERGENCY STOP)'
+                  : currentDecision === 'blocked'
+                  ? 'SAFETY RULE ENGINE: KHÓA XẢ CÁM (BLOCKED)'
+                  : currentDecision === 'adjusted'
+                  ? 'SAFETY RULE ENGINE: ĐIỀU CHỈNH AN TOÀN (ADJUSTED)'
+                  : `SAFETY RULE ENGINE: AN TOÀN (${selectedPond?.code || 'AO-01'})`}
               </Text>
             </View>
             <Text
               style={[
                 styles.safetyDesc,
-                { color: isEmergencyStopped ? '#93000A' : '#005320' },
+                {
+                  color:
+                    isEmergencyStopped || currentDecision === 'blocked'
+                      ? '#93000A'
+                      : currentDecision === 'adjusted'
+                      ? '#92400E'
+                      : '#005320',
+                },
               ]}>
               {isEmergencyStopped
-                ? 'Đã ngắt toàn bộ nguồn điện rơ-le máy rải cám qua sóng LoRa bờ ao.'
-                : `✓ ${selectedPond?.name || farmInfo.selectedPond}: Oxy hòa tan 5.5 mg/L • Đạt chuẩn phun cám an toàn.`}
+                ? `Đã ngắt động cơ máy cho ăn (${feederDevice?.deviceUid || 'ESP32_FEEDER_01'}) qua MQTT.`
+                : lastSafetyEvaluation?.reasons?.[0] ||
+                  `✓ ${selectedPond?.name || farmInfo.selectedPond}: DO = ${doVal} mg/L, pH = ${phVal} • Đạt chuẩn xả cám an toàn.`}
             </Text>
           </View>
 
@@ -129,14 +263,14 @@ export default function ScreenLiveFeeder() {
                 />
                 <Text style={[styles.gaugeStatusText, { color: colors.onSurface }]}>
                   {isEmergencyStopped
-                    ? 'ĐÃ NGẮT NGUỒN'
+                    ? 'ĐÃ NGẮT NGUỒN (E-STOP)'
                     : feederPaused
-                    ? 'TẠM DỪNG PHUN'
-                    : 'ĐANG PHUN CÁM (CỮ 2)'}
+                    ? 'CHẾ ĐỘ THỦ CÔNG (MANUAL)'
+                    : 'CHẾ ĐỘ TỰ ĐỘNG (AUTOMATIC)'}
                 </Text>
               </View>
               <Text style={styles.gaugeSub}>
-                {selectedPond?.code ? `${selectedPond.code} • ` : ''}LoRa 433MHz • Bờ ao
+                {feederDevice?.deviceUid || 'ESP32_FEEDER_01'} • MQTT
               </Text>
             </View>
 
@@ -177,8 +311,8 @@ export default function ScreenLiveFeeder() {
 
             <Text style={[styles.cycleNote, { color: colors.onSurfaceVariant }]}>
               {feederPaused
-                ? '⏸ Rơ-le cấp cám tạm ngắt để bà con kiểm tra sàng'
-                : '⏱ Chu kỳ tự động: Phun 5 giây • Nghỉ 15 giây'}
+                ? '⏸ Đang ở chế độ Thủ công • Tạm ngắt lịch tự động'
+                : '⏱ Chu kỳ MQTT: Tốc độ rải 1.5 kg/phút • Kiểm duyệt Safety Rule'}
             </Text>
           </View>
 
@@ -257,7 +391,7 @@ export default function ScreenLiveFeeder() {
             </View>
           </View>
 
-          {/* Quick Actions Control Strip */}
+          {/* Quick Actions Control Strip (1-Tap Control - UC012) */}
           <View style={styles.quickActionGrid}>
             <Pressable
               onPress={toggleFeederPause}
@@ -279,25 +413,33 @@ export default function ScreenLiveFeeder() {
                   styles.actionBtnText,
                   { color: feederPaused ? '#FFFFFF' : '#9D4300' },
                 ]}>
-                {feederPaused ? 'TIẾP TỤC PHUN' : 'TẠM DỪNG'}
+                {feederPaused ? 'BẬT TỰ ĐỘNG' : 'TẠM DỪNG'}
               </Text>
             </Pressable>
 
             <Pressable
-              onPress={() => addFeederKg(2)}
-              disabled={isEmergencyStopped}
+              onPress={() => handleOpenQuickFeedModal('5.0')}
+              disabled={isFeedBlocked}
               style={({ pressed }) => [
                 styles.actionBtn,
                 {
-                  backgroundColor: '#EFF4FF',
-                  borderColor: '#CCE5FF',
+                  backgroundColor: isFeedBlocked ? '#E5E7EB' : '#EFF4FF',
+                  borderColor: isFeedBlocked ? '#9CA3AF' : '#006398',
                   borderWidth: 1.5,
-                  opacity: pressed || isEmergencyStopped ? 0.8 : 1,
+                  opacity: pressed || isFeedBlocked ? 0.6 : 1,
                 },
               ]}>
-              <MaterialIcons name="add" size={20} color="#006398" />
-              <Text style={[styles.actionBtnText, { color: '#006398' }]}>
-                THÊM +2 KG
+              <MaterialIcons
+                name={isFeedBlocked ? 'block' : 'bolt'}
+                size={20}
+                color={isFeedBlocked ? '#6B7280' : '#006398'}
+              />
+              <Text
+                style={[
+                  styles.actionBtnText,
+                  { color: isFeedBlocked ? '#6B7280' : '#006398' },
+                ]}>
+                {isFeedBlocked ? 'KHÓA XẢ CÁM' : 'CHO ĂN NHANH'}
               </Text>
             </Pressable>
 
@@ -320,7 +462,7 @@ export default function ScreenLiveFeeder() {
             </Pressable>
           </View>
 
-          {/* EMERGENCY STOP BUTTON */}
+          {/* 1-TAP EMERGENCY STOP BUTTON (POST /devices/:id/emergency-stop) */}
           <Pressable
             onPress={isEmergencyStopped ? resetEmergencyStop : triggerEmergencyStop}
             style={({ pressed }) => [
@@ -337,12 +479,144 @@ export default function ScreenLiveFeeder() {
             />
             <Text style={styles.emergencyBtnText}>
               {isEmergencyStopped
-                ? 'KHÔI PHỤC NGUỒN MÁY ĂN'
-                : 'DỪNG KHẨN CẤP TOÀN BỘ MÁY (EMERGENCY)'}
+                ? 'KHÔI PHỤC NGUỒN MÁY ĂN (AUTOMATIC)'
+                : 'DỪNG KHẨN CẤP 1 CHẠM (EMERGENCY STOP)'}
             </Text>
           </Pressable>
         </View>
       </ScrollView>
+
+      {/* MODAL: CHO ĂN NHANH (QUICK FEED) CÓ ĐÁNH GIÁ SAFETY RULE ENGINE */}
+      <Modal
+        visible={showQuickFeedModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowQuickFeedModal(false)}>
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setShowQuickFeedModal(false)}>
+          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.modalHeaderRow}>
+              <MaterialIcons name="bolt" size={24} color="#EA580C" />
+              <Text style={styles.modalHeading}>CHO ĂN NHANH (QUICK FEED)</Text>
+            </View>
+            <Text style={styles.modalSub}>
+              Lệnh xả thức ăn sẽ được kiểm duyệt tự động qua Safety Rule Engine trước khi phát tới máy cho ăn.
+            </Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>KHỐI LƯỢNG CÁM YÊU CẦU (KG):</Text>
+              <TextInput
+                style={styles.textInput}
+                keyboardType="numeric"
+                value={quickFeedKg}
+                onChangeText={handleReEvaluateSafety}
+                placeholder="Nhập số kg (ví dụ: 5.0)"
+              />
+            </View>
+
+            {/* Safety Evaluation Result Box */}
+            <View
+              style={[
+                styles.evalBox,
+                {
+                  backgroundColor:
+                    safetyPreview?.decision === 'blocked'
+                      ? '#FFDAD6'
+                      : safetyPreview?.decision === 'adjusted'
+                      ? '#FEF3C7'
+                      : '#E8F5E9',
+                  borderColor:
+                    safetyPreview?.decision === 'blocked'
+                      ? '#BA1A1A'
+                      : safetyPreview?.decision === 'adjusted'
+                      ? '#F59E0B'
+                      : '#7CF994',
+                },
+              ]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                {isEvaluatingSafety ? (
+                  <ActivityIndicator size="small" color="#EA580C" />
+                ) : (
+                  <MaterialIcons
+                    name={
+                      safetyPreview?.decision === 'blocked'
+                        ? 'gpp-bad'
+                        : safetyPreview?.decision === 'adjusted'
+                        ? 'gpp-maybe'
+                        : 'gpp-good'
+                    }
+                    size={20}
+                    color={
+                      safetyPreview?.decision === 'blocked'
+                        ? '#BA1A1A'
+                        : safetyPreview?.decision === 'adjusted'
+                        ? '#B45309'
+                        : '#006E2D'
+                    }
+                  />
+                )}
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: '900',
+                    color:
+                      safetyPreview?.decision === 'blocked'
+                        ? '#93000A'
+                        : safetyPreview?.decision === 'adjusted'
+                        ? '#92400E'
+                        : '#006E2D',
+                  }}>
+                  {safetyPreview?.decision === 'blocked'
+                    ? 'KẾT QUẢ: CẤM XẢ CÁM (BLOCKED)'
+                    : safetyPreview?.decision === 'adjusted'
+                    ? `KẾT QUẢ: ĐIỀU CHỈNH XUỐNG ${safetyPreview.allowedAmountKg} KG`
+                    : `KẾT QUẢ: CHO PHÉP XẢ ${safetyPreview?.allowedAmountKg ?? quickFeedKg} KG`}
+                </Text>
+              </View>
+              <Text
+                style={{
+                  fontSize: 12,
+                  color: '#0B1C30',
+                  lineHeight: 18,
+                  marginTop: 4,
+                }}>
+                {safetyPreview?.reasons?.[0] ||
+                  `DO = ${doVal} mg/L, pH = ${phVal} • Đủ điều kiện an toàn sinh học.`}
+              </Text>
+            </View>
+
+            <View style={styles.modalActions}>
+              <Pressable
+                onPress={() => setShowQuickFeedModal(false)}
+                style={styles.btnCancel}>
+                <Text style={styles.btnCancelText}>HỦY</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleConfirmQuickFeed}
+                disabled={isTriggeringFeed || safetyPreview?.decision === 'blocked'}
+                style={[
+                  styles.btnConfirm,
+                  (safetyPreview?.decision === 'blocked' || isTriggeringFeed) && {
+                    backgroundColor: '#9CA3AF',
+                  },
+                ]}>
+                {isTriggeringFeed ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.btnConfirmText}>
+                    {safetyPreview?.decision === 'blocked'
+                      ? 'ĐÃ KHÓA XẢ CÁM'
+                      : safetyPreview?.decision === 'adjusted'
+                      ? `XẢ ${safetyPreview.allowedAmountKg} KG`
+                      : 'XÁC NHẬN XẢ CÁM'}
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -377,6 +651,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '900',
     letterSpacing: 0.3,
+    flex: 1,
   },
   safetyDesc: {
     fontSize: 12,
@@ -412,7 +687,7 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
   gaugeStatusText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '900',
   },
   gaugeSub: {
@@ -448,12 +723,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#584237',
-    marginTop: -4,
   },
   percentBadge: {
     paddingHorizontal: 10,
     paddingVertical: 3,
-    borderRadius: 8,
+    borderRadius: 999,
     marginTop: 4,
   },
   percentBadgeText: {
@@ -464,6 +738,7 @@ const styles = StyleSheet.create({
   cycleNote: {
     fontSize: 12,
     fontWeight: '600',
+    textAlign: 'center',
   },
   twoColumnGrid: {
     flexDirection: 'row',
@@ -472,9 +747,9 @@ const styles = StyleSheet.create({
   smallCard: {
     flex: 1,
     padding: 14,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
-    gap: 6,
+    gap: 8,
   },
   smallCardHeader: {
     flexDirection: 'row',
@@ -486,19 +761,18 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   hopperKgVal: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '900',
-    marginTop: 2,
   },
   hopperTrack: {
-    height: 6,
-    borderRadius: 3,
+    width: '100%',
+    height: 8,
+    borderRadius: 999,
     overflow: 'hidden',
-    marginTop: 4,
   },
   hopperFill: {
     height: '100%',
-    borderRadius: 3,
+    borderRadius: 999,
   },
   hopperPercentText: {
     fontSize: 11,
@@ -507,35 +781,32 @@ const styles = StyleSheet.create({
   },
   radiusButtonGroup: {
     flexDirection: 'row',
-    gap: 4,
-    marginTop: 4,
+    gap: 6,
+    marginTop: 2,
   },
   radiusBtn: {
     flex: 1,
-    height: 34,
-    borderRadius: 8,
+    paddingVertical: 8,
+    borderRadius: 10,
     backgroundColor: '#EFF4FF',
     alignItems: 'center',
     justifyContent: 'center',
   },
   radiusBtnSelected: {
-    backgroundColor: '#FFDBCA',
-    borderWidth: 1.5,
-    borderColor: '#F97316',
+    backgroundColor: '#F97316',
   },
   radiusBtnText: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#584237',
   },
   radiusBtnTextSelected: {
-    color: '#9D4300',
-    fontWeight: '900',
+    color: '#FFFFFF',
   },
   radiusHint: {
-    fontSize: 10,
-    color: '#8C7164',
-    marginTop: 2,
+    fontSize: 11,
+    color: '#584237',
+    fontWeight: '600',
   },
   quickActionGrid: {
     flexDirection: 'row',
@@ -543,21 +814,21 @@ const styles = StyleSheet.create({
   },
   actionBtn: {
     flex: 1,
-    height: 48,
-    borderRadius: 12,
+    height: 54,
+    borderRadius: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    elevation: 1,
+    paddingHorizontal: 8,
   },
   actionBtnText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '900',
   },
   emergencyBtn: {
-    height: 56,
-    borderRadius: 16,
+    height: 62,
+    borderRadius: 18,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -573,6 +844,91 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '900',
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 20,
+    gap: 14,
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  modalHeading: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#0B1C30',
+  },
+  modalSub: {
+    fontSize: 12,
+    color: '#584237',
+    lineHeight: 18,
+  },
+  inputGroup: {
+    gap: 6,
+  },
+  inputLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#0B1C30',
+  },
+  textInput: {
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#D4E3FF',
+    paddingHorizontal: 14,
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0B1C30',
+    backgroundColor: '#EFF4FF',
+  },
+  evalBox: {
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1.5,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  btnCancel: {
+    flex: 1,
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: '#EFF4FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnCancelText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#584237',
+  },
+  btnConfirm: {
+    flex: 1.5,
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: '#EA580C',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnConfirmText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#FFFFFF',
   },
 });

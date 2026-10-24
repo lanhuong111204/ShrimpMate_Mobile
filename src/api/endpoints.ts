@@ -107,6 +107,7 @@ export const Endpoints = {
   ai: {
     recommendationsLatest: (pondId: string) => `/ponds/${pondId}/ai/recommendations/latest`,
     recommendationsHistory: (pondId: string) => `/ponds/${pondId}/ai/recommendations`,
+    legacyRecommendations: (pondId: string) => `/ai-integration/ponds/${pondId}/recommendations`,
   },
 
   // 11. Alerts & Incident Handling (/alerts)
@@ -147,10 +148,10 @@ export const Endpoints = {
     create: '/farmers',
     detail: (id: string) => `/farmers/${id}`,
     update: (id: string) => `/farmers/${id}`,
-    delete: (id: string) => `/farmers/${id}`,
+    updateStatus: (id: string) => `/farmers/${id}/status`,
     assignments: (id: string) => `/farmers/${id}/assignments`,
     assign: (id: string) => `/farmers/${id}/assignments`,
-    removeAssignment: (id: string, pondId: string) => `/farmers/${id}/assignments/${pondId}`,
-    myAssignments: '/farmers/me/assignments',
+    removeAssignment: (id: string, assignmentId: string) => `/farmers/${id}/assignments/${assignmentId}`,
+    removeAllAssignments: (id: string) => `/farmers/${id}/assignments`,
   },
 } as const;

@@ -247,7 +247,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         isLoading,
         isAuthenticated: !!user,
-        isOfflineMode: user?.role === 'guest_offline',
+        isOfflineMode: user?.role === 'guest_offline' || user?.id === 'usr_offline',
         isFirstLogin: !!user?.isFirstLogin,
         login,
         register,

@@ -8,63 +8,163 @@ import {
   Modal,
   TextInput,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/use-theme';
 import { AppHeader } from '@/components/common/app-header';
 import { useFarm } from '@/context/farm-context';
+import { EvaluateSafetyResponse } from '@/types/safety-rule';
 
 export default function ScreenFeedingLog() {
   const colors = useTheme();
   const router = useRouter();
-  const { farmInfo, selectedPond, selectedFarm, feedMeals, updateFeedMeal, addExtraMeal } = useFarm();
+  const {
+    farmInfo,
+    selectedPond,
+    latestTelemetry,
+    latestAiRecommendation,
+    latestFis,
+    feedMeals,
+    updateFeedMeal,
+    evaluateSafetyBeforeFeed,
+    triggerQuickFeed,
+    isRefreshingPondData,
+    refreshPondOperationalData,
+  } = useFarm();
 
   const [showExtraModal, setShowExtraModal] = useState(false);
-  const [extraKg, setExtraKg] = useState('5');
-  const [extraNote, setExtraNote] = useState('Cữ chiều bổ sung men tiêu hóa');
+  const [extraKg, setExtraKg] = useState('5.0');
+  const [extraNote, setExtraNote] = useState('Cữ bổ sung nhanh tại bờ ao');
+  const [safetyPreview, setSafetyPreview] = useState<EvaluateSafetyResponse | null>(null);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [isSubmittingExtra, setIsSubmittingExtra] = useState(false);
 
-  // Meal 3 (Chiều)
-  const meal3 = feedMeals.find((m) => m.id === 'meal-3');
+  // Tìm cữ gợi ý AI hoặc cữ chiều
+  const aiMeal = feedMeals.find((m) => m.status === 'ai_suggested' || m.id === 'meal-3') || feedMeals[0];
+  const aiPredictedKg =
+    latestAiRecommendation?.predictedFeedAmountKg ?? aiMeal?.aiSuggestedKg ?? 22.0;
+  const aiBiomassKg = latestAiRecommendation?.biomassKg ?? 780.0;
+  const aiModelName = latestAiRecommendation?.modelName || 'ShrimpMate-FeedOpt-v2';
+  const aiExplanation =
+    latestAiRecommendation?.explanation ||
+    'Tôm bắt mồi mạnh (FIS cao), DO và nhiệt độ nằm trong ngưỡng tối ưu.';
 
   // Summary computations
   const totalTargetKg = feedMeals.reduce((acc, m) => acc + m.targetKg, 0);
   const totalDispensedKg = feedMeals.reduce((acc, m) => acc + m.dispensedKg, 0);
   const remainingKg = Math.max(0, totalTargetKg - totalDispensedKg);
-  const overallPercent = totalTargetKg > 0 ? Math.round((totalDispensedKg / totalTargetKg) * 100) : 0;
+  const overallPercent =
+    totalTargetKg > 0 ? Math.round((totalDispensedKg / totalTargetKg) * 100) : 0;
 
-  const handleAiAccept = () => {
-    updateFeedMeal('meal-3', {
-      targetKg: 22.0,
-      isAiAccepted: true,
-      notes: 'Đã áp dụng khuyến nghị AI: giảm xuống 22kg để bảo vệ đáy ao',
-    });
-    Alert.alert('Đã Áp Dụng Đề Xuất AI', 'Cữ chiều đã giảm xuống 22 kg để bảo vệ đáy ao.');
+  const handleAiAccept = async () => {
+    if (aiMeal) {
+      updateFeedMeal(aiMeal.id, {
+        targetKg: aiPredictedKg,
+        isAiAccepted: true,
+        notes: `Đã áp dụng khuyến nghị AI (${aiPredictedKg}kg): ${aiExplanation}`,
+      });
+    }
+    const res = await triggerQuickFeed(aiPredictedKg, 'ai', aiMeal?.id, 'Áp dụng khuyến nghị AI');
+    if (!res.success) {
+      Alert.alert(
+        '⛔ Khóa An Toàn Sinh Học',
+        res.evaluation.reasons.join('\n') || 'Cấm xả cám do vi phạm ngưỡng an toàn nước.'
+      );
+      return;
+    }
+    Alert.alert(
+      'Đã Áp Dụng Khuyến Nghị AI',
+      `Đã kích hoạt cữ ăn theo đề xuất AI (${res.evaluation.allowedAmountKg} kg).`
+    );
   };
 
   const handleAiKeep = () => {
-    updateFeedMeal('meal-3', {
-      targetKg: 25.0,
-      isAiAccepted: false,
-      notes: 'Đã giữ nguyên 25kg theo ý định của chủ đầm',
-    });
-    Alert.alert('Giữ Nguyên Khẩu Phần', 'Đã lưu khẩu phần 25 kg theo quyết định của chủ đầm.');
+    if (aiMeal) {
+      updateFeedMeal(aiMeal.id, {
+        isAiAccepted: false,
+        notes: `Giữ nguyên định mức ${aiMeal.targetKg}kg theo quyết định tại bờ ao`,
+      });
+    }
+    Alert.alert(
+      'Giữ Nguyên Khẩu Phần',
+      `Đã lưu khẩu phần ${aiMeal?.targetKg ?? 25} kg theo quyết định của kỹ thuật viên.`
+    );
   };
 
-  const handleSaveExtraMeal = () => {
+  const handleOpenQuickFeedModal = async () => {
+    setShowExtraModal(true);
+    const parsed = parseFloat(extraKg) || 5.0;
+    setIsEvaluating(true);
+    try {
+      const ev = await evaluateSafetyBeforeFeed(parsed);
+      setSafetyPreview(ev);
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
+  const handleChangeExtraKg = async (val: string) => {
+    setExtraKg(val);
+    const parsed = parseFloat(val);
+    if (!isNaN(parsed) && parsed > 0) {
+      setIsEvaluating(true);
+      try {
+        const ev = await evaluateSafetyBeforeFeed(parsed);
+        setSafetyPreview(ev);
+      } finally {
+        setIsEvaluating(false);
+      }
+    }
+  };
+
+  const handleSaveExtraMeal = async () => {
     const parsedKg = parseFloat(extraKg);
     if (isNaN(parsedKg) || parsedKg <= 0) {
       Alert.alert('Lỗi', 'Vui lòng nhập số kg hợp lệ');
       return;
     }
-    addExtraMeal(parsedKg, extraNote);
-    setShowExtraModal(false);
+    setIsSubmittingExtra(true);
+    try {
+      const res = await triggerQuickFeed(parsedKg, 'manual', undefined, extraNote);
+      setSafetyPreview(res.evaluation);
+      if (!res.success || res.evaluation.decision === 'blocked') {
+        Alert.alert(
+          '⛔ KHÓA AN TOÀN SINH HỌC (BLOCKED)',
+          res.evaluation.reasons.join('\n') ||
+            'Chỉ số nước vượt ngưỡng nguy hiểm. Cấm xả cám!'
+        );
+        return;
+      }
+      setShowExtraModal(false);
+      if (res.evaluation.decision === 'adjusted') {
+        Alert.alert(
+          '⚠️ ĐÃ ĐIỀU CHỈNH KHẨU PHẦN AN TOÀN',
+          `${res.evaluation.reasons.join('\n')}\n\nĐã phát lệnh xả ${res.evaluation.allowedAmountKg} kg cám.`
+        );
+      } else {
+        Alert.alert(
+          'Cho Ăn Nhanh Thành Công',
+          `Đã kiểm duyệt Safety Rule Engine và phát lệnh xả ${parsedKg} kg cám!`
+        );
+      }
+    } finally {
+      setIsSubmittingExtra(false);
+    }
   };
 
   const pondDisplayName = selectedPond?.name || selectedPond?.code || farmInfo.selectedPond;
   const pondAreaDesc = selectedPond?.areaM2
-    ? `${selectedPond.areaM2.toLocaleString('vi-VN')} m² • ${selectedPond.status === 'maintenance' ? 'Đang bảo dưỡng' : 'Ao đang vận hành'}`
-    : 'Tôm thẻ chân trắng • 42 ngày tuổi';
+    ? `${selectedPond.areaM2.toLocaleString('vi-VN')} m² • ${
+        selectedPond.status === 'maintenance' ? 'Đang bảo dưỡng' : 'Ao được phân công'
+      }`
+    : 'Tôm thẻ chân trắng • Ao được phân công';
+
+  const waterTemp = latestTelemetry?.temperatureC ?? farmInfo.waterTemp;
+  const doVal = latestTelemetry?.dissolvedOxygenMgL ?? farmInfo.dissolvedOxygen;
+  const fisLevel = latestFis?.status?.appetiteLevel ?? 3;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.surface }]}>
@@ -72,14 +172,25 @@ export default function ScreenFeedingLog() {
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshingPondData}
+            onRefresh={refreshPondOperationalData}
+            colors={['#EA580C']}
+            tintColor="#EA580C"
+          />
+        }>
         <View style={styles.container}>
           {/* Pond Quick Status Strip */}
           <Pressable
-            onPress={() => router.push('/(tabs)/may-cho-an')}
+            onPress={() => router.push('/(tabs)/quan-ly-ao')}
             style={[
               styles.pondStrip,
-              { backgroundColor: colors.surfaceContainerLowest, borderColor: colors.outlineVariant + '40' },
+              {
+                backgroundColor: colors.surfaceContainerLowest,
+                borderColor: colors.outlineVariant + '40',
+              },
             ]}>
             <View style={styles.pondStripLeft}>
               <View style={[styles.pondIconBox, { backgroundColor: '#FFDBCA' }]}>
@@ -90,7 +201,11 @@ export default function ScreenFeedingLog() {
                   <Text style={[styles.pondNameText, { color: colors.onSurface }]}>
                     {pondDisplayName}
                   </Text>
-                  <MaterialIcons name="arrow-forward-ios" size={13} color={colors.onSurfaceVariant} />
+                  <MaterialIcons
+                    name="arrow-forward-ios"
+                    size={13}
+                    color={colors.onSurfaceVariant}
+                  />
                 </View>
                 <Text style={[styles.pondSubText, { color: colors.secondary }]}>
                   {pondAreaDesc}
@@ -99,10 +214,10 @@ export default function ScreenFeedingLog() {
             </View>
 
             <View style={styles.weatherBox}>
-              <Text style={styles.weatherLabel}>Nhiệt độ nước</Text>
+              <Text style={styles.weatherLabel}>DO: {doVal} mg/L</Text>
               <View style={styles.tempRow}>
                 <MaterialIcons name="wb-sunny" size={16} color="#F97316" />
-                <Text style={styles.tempVal}>{farmInfo.waterTemp}°C</Text>
+                <Text style={styles.tempVal}>{waterTemp}°C</Text>
               </View>
             </View>
           </Pressable>
@@ -111,7 +226,10 @@ export default function ScreenFeedingLog() {
           <View
             style={[
               styles.heroCard,
-              { backgroundColor: colors.surfaceContainerLowest, borderColor: colors.outlineVariant + '40' },
+              {
+                backgroundColor: colors.surfaceContainerLowest,
+                borderColor: colors.outlineVariant + '40',
+              },
             ]}>
             <View style={styles.heroHeader}>
               <View style={styles.heroTitleRow}>
@@ -123,26 +241,29 @@ export default function ScreenFeedingLog() {
               <View style={[styles.badgePill, { backgroundColor: colors.secondaryContainer }]}>
                 <View style={[styles.dot, { backgroundColor: colors.secondary }]} />
                 <Text style={[styles.badgeText, { color: colors.onSecondaryContainer }]}>
-                  4 Cữ Chuẩn
+                  {feedMeals.length} Cữ • FIS Mức {fisLevel}
                 </Text>
               </View>
             </View>
 
             {/* Metric 3-Column Split */}
             <View style={[styles.metricGrid, { backgroundColor: colors.surfaceContainerLow }]}>
-              <View style={[styles.metricCol, { backgroundColor: colors.surfaceContainerLowest }]}>
-                <Text style={styles.colLabel}>Tổng lượng</Text>
-                <Text style={styles.colVal}>{totalTargetKg}</Text>
+              <View
+                style={[styles.metricCol, { backgroundColor: colors.surfaceContainerLowest }]}>
+                <Text style={styles.colLabel}>Tổng định mức</Text>
+                <Text style={styles.colVal}>{totalTargetKg.toFixed(1)}</Text>
                 <Text style={styles.colUnit}>kg cám</Text>
               </View>
-              <View style={[styles.metricCol, { backgroundColor: colors.surfaceContainerLowest }]}>
+              <View
+                style={[styles.metricCol, { backgroundColor: colors.surfaceContainerLowest }]}>
                 <Text style={[styles.colLabel, { color: colors.secondary }]}>Đã rải</Text>
                 <Text style={[styles.colVal, { color: colors.secondary }]}>
                   {totalDispensedKg.toFixed(1)}
                 </Text>
                 <Text style={styles.colUnit}>kg cám</Text>
               </View>
-              <View style={[styles.metricCol, { backgroundColor: colors.surfaceContainerLowest }]}>
+              <View
+                style={[styles.metricCol, { backgroundColor: colors.surfaceContainerLowest }]}>
                 <Text style={[styles.colLabel, { color: '#F97316' }]}>Còn lại</Text>
                 <Text style={[styles.colVal, { color: '#F97316' }]}>
                   {remainingKg.toFixed(1)}
@@ -156,94 +277,109 @@ export default function ScreenFeedingLog() {
               <View style={styles.progressLabels}>
                 <Text style={styles.progressPercentText}>{overallPercent}% khẩu phần</Text>
                 <Text style={styles.progressSubText}>
-                  Còn {feedMeals.filter((m) => m.status === 'pending' || m.status === 'ai_suggested').length} cữ nữa
+                  Sinh khối ước tính: {aiBiomassKg} kg
                 </Text>
               </View>
-              <View style={[styles.progressBarTrack, { backgroundColor: colors.surfaceContainerHigh }]}>
+              <View
+                style={[
+                  styles.progressBarTrack,
+                  { backgroundColor: colors.surfaceContainerHigh },
+                ]}>
                 <View
                   style={[
                     styles.progressBarFill,
-                    { width: `${Math.min(100, overallPercent)}%`, backgroundColor: colors.secondary },
+                    {
+                      width: `${Math.min(100, overallPercent)}%`,
+                      backgroundColor: colors.secondary,
+                    },
                   ]}
                 />
               </View>
             </View>
           </View>
 
-          {/* Gemini AI Adaptive Recommendation Card */}
-          {meal3 && (
-            <View
-              style={[
-                styles.aiCard,
-                {
-                  backgroundColor:
-                    meal3.isAiAccepted === true
-                      ? '#E8F5E9'
-                      : meal3.isAiAccepted === false
-                      ? '#FFF3E0'
-                      : '#FFF8F5',
-                  borderColor: meal3.isAiAccepted === true ? '#7CF994' : '#F97316',
-                },
-              ]}>
-              <View style={styles.aiHeader}>
-                <View style={styles.aiBadgeGroup}>
-                  <MaterialIcons name="auto-awesome" size={20} color="#F97316" />
-                  <Text style={styles.aiBadgeTitle}>GỢI Ý GEMINI AI TỐI ƯU CỮ CHIỀU</Text>
-                </View>
-                <View style={styles.aiStatusBadge}>
-                  <Text style={styles.aiStatusText}>
-                    {meal3.isAiAccepted === true
-                      ? '✓ ĐÃ ÁP DỤNG'
-                      : meal3.isAiAccepted === false
-                      ? 'GIỮ NGUYÊN 25KG'
-                      : 'ĐỀ XUẤT MỚI'}
-                  </Text>
-                </View>
+          {/* AI Recommendation Summary Card (UC014 - GET /ponds/:pondId/ai/recommendations/latest) */}
+          <View
+            style={[
+              styles.aiCard,
+              {
+                backgroundColor:
+                  aiMeal?.isAiAccepted === true
+                    ? '#E8F5E9'
+                    : aiMeal?.isAiAccepted === false
+                    ? '#FFF3E0'
+                    : '#FFF8F5',
+                borderColor: aiMeal?.isAiAccepted === true ? '#7CF994' : '#F97316',
+              },
+            ]}>
+            <View style={styles.aiHeader}>
+              <View style={styles.aiBadgeGroup}>
+                <MaterialIcons name="auto-awesome" size={20} color="#F97316" />
+                <Text style={styles.aiBadgeTitle}>
+                  KHUYẾN NGHỊ AI ({aiModelName.toUpperCase()})
+                </Text>
               </View>
-
-              <Text style={styles.aiBodyText}>
-                Cắt giảm <Text style={{ fontWeight: '900', color: '#9D4300' }}>-3.0 kg</Text> (từ 25kg xuống còn{' '}
-                <Text style={{ fontWeight: '900', color: '#006E2D' }}>22.0 kg</Text>).
-              </Text>
-              <Text style={styles.aiReasonText}>
-                💡 Lý do: Đỉnh nắng 32°C trưa nay làm oxy hòa tan tầng đáy giảm còn 4.8 mg/L. Giảm lượng cám giúp tôm ăn sạch nhá, không bị đọng đáy gây khí độc NH3.
-              </Text>
-
-              {meal3.isAiAccepted === undefined && (
-                <View style={styles.aiActionsRow}>
-                  <Pressable
-                    onPress={handleAiAccept}
-                    style={({ pressed }) => [
-                      styles.btnAiAccept,
-                      { opacity: pressed ? 0.9 : 1 },
-                    ]}>
-                    <MaterialIcons name="check" size={18} color="#FFFFFF" />
-                    <Text style={styles.btnAiAcceptText}>Áp dụng (22 kg)</Text>
-                  </Pressable>
-
-                  <Pressable
-                    onPress={handleAiKeep}
-                    style={({ pressed }) => [
-                      styles.btnAiKeep,
-                      { opacity: pressed ? 0.9 : 1 },
-                    ]}>
-                    <Text style={styles.btnAiKeepText}>Giữ nguyên 25 kg</Text>
-                  </Pressable>
-                </View>
-              )}
+              <View style={styles.aiStatusBadge}>
+                <Text style={styles.aiStatusText}>
+                  {aiMeal?.isAiAccepted === true
+                    ? '✓ ĐÃ ÁP DỤNG'
+                    : aiMeal?.isAiAccepted === false
+                    ? 'GIỮ ĐỊNH MỨC'
+                    : `TIN CẬY ${Math.round((latestAiRecommendation?.confidence ?? 0.94) * 100)}%`}
+                </Text>
+              </View>
             </View>
-          )}
+
+            <Text style={styles.aiBodyText}>
+              Khuyến nghị cữ hiện tại:{' '}
+              <Text style={{ fontWeight: '900', color: '#006E2D' }}>
+                {aiPredictedKg.toFixed(1)} kg
+              </Text>{' '}
+              • Tốc độ rải:{' '}
+              <Text style={{ fontWeight: '900', color: '#9D4300' }}>
+                {latestAiRecommendation?.spreadRateKgPerMinute ?? 1.5} kg/phút
+              </Text>
+            </Text>
+            <Text style={styles.aiReasonText}>💡 {aiExplanation}</Text>
+
+            {aiMeal?.isAiAccepted === undefined && (
+              <View style={styles.aiActionsRow}>
+                <Pressable
+                  onPress={handleAiAccept}
+                  style={({ pressed }) => [
+                    styles.btnAiAccept,
+                    { opacity: pressed ? 0.9 : 1 },
+                  ]}>
+                  <MaterialIcons name="check" size={18} color="#FFFFFF" />
+                  <Text style={styles.btnAiAcceptText}>
+                    Xả theo AI ({aiPredictedKg.toFixed(1)} kg)
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={handleAiKeep}
+                  style={({ pressed }) => [
+                    styles.btnAiKeep,
+                    { opacity: pressed ? 0.9 : 1 },
+                  ]}>
+                  <Text style={styles.btnAiKeepText}>
+                    Giữ nguyên {aiMeal?.targetKg ?? 25} kg
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
 
           {/* Meal Timeline List */}
           <View style={styles.sectionHeaderRow}>
             <Text style={[styles.sectionTitle, { color: colors.onSurface }]}>
-              DANH SÁCH CỮ ĂN HÔM NAY
+              LỊCH CHO ĂN & NHẬT KÝ CỮ ĂN
             </Text>
             <Pressable
-              onPress={() => setShowExtraModal(true)}
+              onPress={handleOpenQuickFeedModal}
               style={[styles.addMealBtn, { backgroundColor: '#FFDBCA' }]}>
-              <MaterialIcons name="add" size={16} color="#9D4300" />
-              <Text style={styles.addMealText}>Thêm Cữ Phụ</Text>
+              <MaterialIcons name="bolt" size={16} color="#9D4300" />
+              <Text style={styles.addMealText}>Cho Ăn Nhanh (Quick Feed)</Text>
             </Pressable>
           </View>
 
@@ -307,7 +443,11 @@ export default function ScreenFeedingLog() {
                               : '#584237',
                           },
                         ]}>
-                        {isCompleted ? '✓ Hoàn thành' : isActive ? '⚡ Đang phun' : '⏳ Chờ đến giờ'}
+                        {isCompleted
+                          ? '✓ Hoàn thành'
+                          : isActive
+                          ? '⚡ Đang rải'
+                          : '⏳ Theo lịch'}
                       </Text>
                     </View>
                   </View>
@@ -322,9 +462,7 @@ export default function ScreenFeedingLog() {
                     </Text>
                   </View>
 
-                  {meal.notes && (
-                    <Text style={styles.mealNotes}>📝 {meal.notes}</Text>
-                  )}
+                  {meal.notes && <Text style={styles.mealNotes}>📝 {meal.notes}</Text>}
                 </View>
               );
             })}
@@ -332,7 +470,7 @@ export default function ScreenFeedingLog() {
         </View>
       </ScrollView>
 
-      {/* Modal: Thêm Cữ Ăn Phụ */}
+      {/* Modal: Cho ăn nhanh (Quick Feed) có kiểm duyệt Safety Rule Engine */}
       <Modal
         visible={showExtraModal}
         transparent
@@ -341,31 +479,96 @@ export default function ScreenFeedingLog() {
         <Pressable
           style={styles.modalBackdrop}
           onPress={() => setShowExtraModal(false)}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalHeading}>THÊM CỮ ĂN PHỤ / TRỘN THUỐC</Text>
+          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalHeading}>CHO ĂN NHANH (QUICK FEED)</Text>
             <Text style={styles.modalSub}>
-              Nhập số lượng cám bổ sung và ghi chú dinh dưỡng cho ao
+              Kiểm tra tự động qua POST /ponds/:pondId/safety-rules/evaluate trước khi xả
             </Text>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Khẩu phần (kg cám):</Text>
+              <Text style={styles.inputLabel}>Khẩu phần yêu cầu (kg cám):</Text>
               <TextInput
                 style={styles.textInput}
                 keyboardType="numeric"
                 value={extraKg}
-                onChangeText={setExtraKg}
-                placeholder="Ví dụ: 5"
+                onChangeText={handleChangeExtraKg}
+                placeholder="Ví dụ: 5.0"
               />
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Ghi chú / Loại men thuốc:</Text>
+              <Text style={styles.inputLabel}>Ghi chú cữ ăn:</Text>
               <TextInput
                 style={styles.textInput}
                 value={extraNote}
                 onChangeText={setExtraNote}
-                placeholder="Ví dụ: Men tỏi đường ruột, khoáng tạt"
+                placeholder="Ví dụ: Bổ sung cữ chiều tại bờ ao"
               />
+            </View>
+
+            {/* Safety Evaluation Box */}
+            <View
+              style={[
+                styles.safetyEvalCard,
+                {
+                  backgroundColor:
+                    safetyPreview?.decision === 'blocked'
+                      ? '#FFDAD6'
+                      : safetyPreview?.decision === 'adjusted'
+                      ? '#FEF3C7'
+                      : '#E8F5E9',
+                  borderColor:
+                    safetyPreview?.decision === 'blocked'
+                      ? '#BA1A1A'
+                      : safetyPreview?.decision === 'adjusted'
+                      ? '#F59E0B'
+                      : '#7CF994',
+                },
+              ]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                {isEvaluating ? (
+                  <ActivityIndicator size="small" color="#EA580C" />
+                ) : (
+                  <MaterialIcons
+                    name={
+                      safetyPreview?.decision === 'blocked'
+                        ? 'gpp-bad'
+                        : safetyPreview?.decision === 'adjusted'
+                        ? 'gpp-maybe'
+                        : 'gpp-good'
+                    }
+                    size={18}
+                    color={
+                      safetyPreview?.decision === 'blocked'
+                        ? '#BA1A1A'
+                        : safetyPreview?.decision === 'adjusted'
+                        ? '#B45309'
+                        : '#006E2D'
+                    }
+                  />
+                )}
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: '900',
+                    color:
+                      safetyPreview?.decision === 'blocked'
+                        ? '#93000A'
+                        : safetyPreview?.decision === 'adjusted'
+                        ? '#92400E'
+                        : '#006E2D',
+                  }}>
+                  {safetyPreview?.decision === 'blocked'
+                    ? 'KHÓA AN TOÀN: CẤM XẢ CÁM'
+                    : safetyPreview?.decision === 'adjusted'
+                    ? `ĐIỀU CHỈNH AN TOÀN: ${safetyPreview.allowedAmountKg} KG`
+                    : `AN TOÀN: CHO PHÉP XẢ ${safetyPreview?.allowedAmountKg ?? extraKg} KG`}
+                </Text>
+              </View>
+              <Text style={{ fontSize: 11, color: '#0B1C30', marginTop: 4 }}>
+                {safetyPreview?.reasons?.[0] ||
+                  `DO = ${doVal} mg/L • Đủ điều kiện xả thức ăn an toàn.`}
+              </Text>
             </View>
 
             <View style={styles.modalActions}>
@@ -376,11 +579,27 @@ export default function ScreenFeedingLog() {
               </Pressable>
               <Pressable
                 onPress={handleSaveExtraMeal}
-                style={styles.btnConfirm}>
-                <Text style={styles.btnConfirmText}>Lưu Cữ Ăn</Text>
+                disabled={isSubmittingExtra || safetyPreview?.decision === 'blocked'}
+                style={[
+                  styles.btnConfirm,
+                  (safetyPreview?.decision === 'blocked' || isSubmittingExtra) && {
+                    backgroundColor: '#9CA3AF',
+                  },
+                ]}>
+                {isSubmittingExtra ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.btnConfirmText}>
+                    {safetyPreview?.decision === 'blocked'
+                      ? 'Bị Chặn'
+                      : safetyPreview?.decision === 'adjusted'
+                      ? `Xả ${safetyPreview.allowedAmountKg} kg`
+                      : 'Xác Nhận Xả'}
+                  </Text>
+                )}
               </Pressable>
             </View>
-          </View>
+          </Pressable>
         </Pressable>
       </Modal>
     </View>
@@ -447,8 +666,8 @@ const styles = StyleSheet.create({
   },
   weatherLabel: {
     fontSize: 11,
-    color: '#584237',
-    fontWeight: '600',
+    color: '#006E2D',
+    fontWeight: '800',
   },
   tempRow: {
     flexDirection: 'row',
@@ -548,7 +767,7 @@ const styles = StyleSheet.create({
   progressSubText: {
     fontSize: 11,
     color: '#584237',
-    fontWeight: '600',
+    fontWeight: '700',
   },
   progressBarTrack: {
     height: 8,
@@ -577,7 +796,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   aiBadgeTitle: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '900',
     color: '#9D4300',
     letterSpacing: 0.3,
@@ -594,7 +813,7 @@ const styles = StyleSheet.create({
     color: '#9D4300',
   },
   aiBodyText: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#0B1C30',
     fontWeight: '600',
   },
@@ -620,7 +839,7 @@ const styles = StyleSheet.create({
   },
   btnAiAcceptText: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
   },
   btnAiKeep: {
@@ -635,7 +854,7 @@ const styles = StyleSheet.create({
   },
   btnAiKeepText: {
     color: '#584237',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
   },
   sectionHeaderRow: {
@@ -658,7 +877,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   addMealText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
     color: '#9D4300',
   },
@@ -726,7 +945,7 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     width: '100%',
-    maxWidth: 380,
+    maxWidth: 390,
     backgroundColor: '#FFFFFF',
     borderRadius: 24,
     padding: 20,
@@ -758,6 +977,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     backgroundColor: '#EFF4FF',
   },
+  safetyEvalCard: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+  },
   modalActions: {
     flexDirection: 'row',
     gap: 10,
@@ -777,7 +1001,7 @@ const styles = StyleSheet.create({
     color: '#584237',
   },
   btnConfirm: {
-    flex: 1,
+    flex: 1.2,
     height: 44,
     borderRadius: 10,
     backgroundColor: '#F97316',

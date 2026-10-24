@@ -31,12 +31,40 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
     selectPond,
     isLoadingPonds,
     refreshFarmsAndPonds,
+    refreshPondOperationalData,
+    alerts,
+    alertSummary,
+    acknowledgeAlert,
+    resolveAlert,
     farmInfo,
   } = useFarm();
 
   const [showPondModal, setShowPondModal] = useState(false);
   const [showNotiModal, setShowNotiModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [processingAlertId, setProcessingAlertId] = useState<string | null>(null);
+
+  const openAlertsCount =
+    alertSummary?.open ??
+    alerts.filter((a) => !a.status || a.status === 'open').length;
+
+  const handleAcknowledge = async (id: string) => {
+    setProcessingAlertId(id);
+    try {
+      await acknowledgeAlert(id);
+    } finally {
+      setProcessingAlertId(null);
+    }
+  };
+
+  const handleResolve = async (id: string) => {
+    setProcessingAlertId(id);
+    try {
+      await resolveAlert(id);
+    } finally {
+      setProcessingAlertId(null);
+    }
+  };
 
   const handleSelectPond = (pondId: string) => {
     selectPond(pondId);
@@ -95,7 +123,7 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
             <MaterialIcons name="expand-more" size={16} color="#FFFFFF" />
           </Pressable>
 
-          {/* Notification Bell */}
+          {/* Notification Bell with Summary Badge */}
           <Pressable
             onPress={() => setShowNotiModal(true)}
             style={({ pressed }) => [
@@ -103,7 +131,13 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
               { opacity: pressed ? 0.85 : 1 },
             ]}>
             <MaterialIcons name="notifications" size={20} color="#FFFFFF" />
-            <View style={styles.notiBadge} />
+            {openAlertsCount > 0 && (
+              <View style={styles.notiCountBadge}>
+                <Text style={styles.notiCountText}>
+                  {openAlertsCount > 9 ? '9+' : openAlertsCount}
+                </Text>
+              </View>
+            )}
           </Pressable>
 
           {/* User Profile Avatar */}
@@ -134,7 +168,7 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
             <View style={styles.modalHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
                 <MaterialIcons name="waves" size={22} color="#EA580C" />
-                <Text style={styles.modalTitle}>CHỌN AO NUÔI QUẢN LÝ</Text>
+                <Text style={styles.modalTitle}>CHỌN AO NUÔI ĐƯỢC PHÂN CÔNG</Text>
               </View>
               <Pressable
                 onPress={() => refreshFarmsAndPonds()}
@@ -151,7 +185,7 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
             {/* Farm Selector Tabs (nếu người nuôi có nhiều hơn 1 trang trại) */}
             {farms.length > 1 && (
               <View style={{ marginBottom: 12 }}>
-                <Text style={styles.sectionSubtitle}>TRANG TRẠI NUÔI</Text>
+                <Text style={styles.sectionSubtitle}>TRANG TRẠI ĐƯỢC PHÂN CÔNG</Text>
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
@@ -207,10 +241,10 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
               <View style={{ paddingVertical: 24, alignItems: 'center', gap: 6 }}>
                 <MaterialIcons name="info-outline" size={26} color="#8C7164" />
                 <Text style={{ fontSize: 13, color: '#584237', fontWeight: '700' }}>
-                  Trang trại chưa có ao nuôi nào
+                  Chưa có ao nuôi nào được phân công
                 </Text>
                 <Text style={{ fontSize: 11, color: '#8C7164' }}>
-                  Vui lòng thêm ao nuôi mới trên hệ thống
+                  Vui lòng liên hệ Quản lý đầm (Manager) để được gán ao
                 </Text>
               </View>
             ) : (
@@ -289,7 +323,7 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
         </Pressable>
       </Modal>
 
-      {/* MODAL 2: NOTIFICATIONS */}
+      {/* MODAL 2: CẢNH BÁO & XỬ LÝ SỰ CỐ BỜ AO (UC015 - ACKNOWLEDGE & RESOLVE) */}
       <Modal
         visible={showNotiModal}
         transparent
@@ -298,43 +332,169 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
         <Pressable
           style={styles.modalBackdrop}
           onPress={() => setShowNotiModal(false)}>
-          <View style={styles.modalCard}>
+          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
             <View style={styles.modalHeader}>
-              <MaterialIcons name="notifications-active" size={22} color="#EA580C" />
-              <Text style={styles.modalTitle}>THÔNG BÁO BỜ AO</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                <MaterialIcons name="notifications-active" size={22} color="#EA580C" />
+                <Text style={styles.modalTitle}>CẢNH BÁO & XỬ LÝ SỰ CỐ</Text>
+              </View>
+              <Pressable
+                onPress={() => refreshPondOperationalData()}
+                style={{ padding: 4, marginRight: 4 }}>
+                <MaterialIcons name="refresh" size={20} color="#8C7164" />
+              </Pressable>
+              <Pressable
+                onPress={() => setShowNotiModal(false)}
+                style={{ padding: 4 }}>
+                <MaterialIcons name="close" size={20} color="#8C7164" />
+              </Pressable>
             </View>
-            <ScrollView style={{ maxHeight: 300 }}>
-              <View style={styles.notiCardAlert}>
-                <MaterialIcons name="warning" size={20} color="#BA1A1A" />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.notiAlertTitle}>Cảnh Báo Cám Sắp Hết</Text>
-                  <Text style={styles.notiAlertBody}>
-                    Ao 03: Thùng chứa Hopper chỉ còn dưới 15 kg cám. Vui lòng nạp thêm bao cám mới!
-                  </Text>
-                </View>
-              </View>
 
-              <View style={styles.notiCardInfo}>
-                <MaterialIcons name="psychology" size={20} color="#F97316" />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.notiInfoTitle}>Khuyến Nghị Gemini AI</Text>
-                  <Text style={styles.notiInfoBody}>
-                    Đỉnh nắng trưa 32°C: Đề xuất tự động giảm 3kg cữ chiều để bảo vệ chất lượng đáy ao.
+            {/* Summary Badges Row */}
+            {alertSummary && (
+              <View style={styles.alertSummaryRow}>
+                <View style={[styles.summaryBadgeItem, { backgroundColor: '#FFDAD6' }]}>
+                  <Text style={[styles.summaryBadgeNum, { color: '#BA1A1A' }]}>
+                    {alertSummary.open}
                   </Text>
+                  <Text style={[styles.summaryBadgeLabel, { color: '#93000A' }]}>Đang mở</Text>
+                </View>
+                <View style={[styles.summaryBadgeItem, { backgroundColor: '#FEF3C7' }]}>
+                  <Text style={[styles.summaryBadgeNum, { color: '#B45309' }]}>
+                    {alertSummary.acknowledged}
+                  </Text>
+                  <Text style={[styles.summaryBadgeLabel, { color: '#92400E' }]}>Đã tiếp nhận</Text>
+                </View>
+                <View style={[styles.summaryBadgeItem, { backgroundColor: '#E8F5E9' }]}>
+                  <Text style={[styles.summaryBadgeNum, { color: '#006E2D' }]}>
+                    {alertSummary.resolved}
+                  </Text>
+                  <Text style={[styles.summaryBadgeLabel, { color: '#005320' }]}>Đã khắc phục</Text>
                 </View>
               </View>
+            )}
 
-              <View style={styles.notiCardSuccess}>
-                <MaterialIcons name="check-circle" size={20} color="#006E2D" />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.notiSuccessTitle}>Trạm Quan Trắc Ba Tri</Text>
-                  <Text style={styles.notiSuccessBody}>
-                    Độ mặn 18‰ • Con nước lúc 16:30 (+1.8m) lấy nước vào vuông rất thuận lợi.
+            <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
+              {alerts.length === 0 ? (
+                <View style={{ paddingVertical: 24, alignItems: 'center', gap: 8 }}>
+                  <MaterialIcons name="verified" size={32} color="#006E2D" />
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: '#006E2D' }}>
+                    Ao nuôi an toàn, không có sự cố tồn đọng
                   </Text>
                 </View>
-              </View>
+              ) : (
+                alerts.map((item) => {
+                  const isCritical = item.severity === 3 || item.severity === 'critical';
+                  const isWarning = item.severity === 2 || item.severity === 'warning';
+                  const status = item.status || 'open';
+                  const isResolved = status === 'resolved';
+                  const isAck = status === 'acknowledged';
+                  const isBusy = processingAlertId === item.id;
+
+                  return (
+                    <View
+                      key={item.id}
+                      style={[
+                        isCritical
+                          ? styles.notiCardAlert
+                          : isWarning
+                          ? styles.notiCardInfo
+                          : styles.notiCardSuccess,
+                        isResolved && { opacity: 0.72 },
+                      ]}>
+                      <MaterialIcons
+                        name={
+                          isResolved
+                            ? 'check-circle'
+                            : isCritical
+                            ? 'error'
+                            : isWarning
+                            ? 'warning'
+                            : 'info'
+                        }
+                        size={20}
+                        color={
+                          isResolved
+                            ? '#006E2D'
+                            : isCritical
+                            ? '#BA1A1A'
+                            : isWarning
+                            ? '#9D4300'
+                            : '#006E2D'
+                        }
+                      />
+                      <View style={{ flex: 1, gap: 4 }}>
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                          }}>
+                          <Text
+                            style={
+                              isCritical
+                                ? styles.notiAlertTitle
+                                : isWarning
+                                ? styles.notiInfoTitle
+                                : styles.notiSuccessTitle
+                            }>
+                            {item.title || item.type || 'Cảnh báo môi trường'}
+                          </Text>
+                          <View
+                            style={[
+                              styles.alertStateTag,
+                              {
+                                backgroundColor: isResolved
+                                  ? '#006E2D'
+                                  : isAck
+                                  ? '#D97706'
+                                  : '#BA1A1A',
+                              },
+                            ]}>
+                            <Text style={styles.alertStateTagText}>
+                              {isResolved ? 'ĐÃ XỬ LÝ' : isAck ? 'ĐÃ TIẾP NHẬN' : 'MỚI'}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <Text
+                          style={
+                            isCritical
+                              ? styles.notiAlertBody
+                              : isWarning
+                              ? styles.notiInfoBody
+                              : styles.notiSuccessBody
+                          }>
+                          {item.message}
+                        </Text>
+
+                        {!isResolved && (
+                          <View style={styles.alertActionRow}>
+                            {status === 'open' && (
+                              <Pressable
+                                disabled={isBusy}
+                                onPress={() => handleAcknowledge(item.id)}
+                                style={styles.btnAlertAck}>
+                                <MaterialIcons name="visibility" size={14} color="#92400E" />
+                                <Text style={styles.btnAlertAckText}>Tiếp nhận</Text>
+                              </Pressable>
+                            )}
+                            <Pressable
+                              disabled={isBusy}
+                              onPress={() => handleResolve(item.id)}
+                              style={styles.btnAlertResolve}>
+                              <MaterialIcons name="done-all" size={14} color="#FFFFFF" />
+                              <Text style={styles.btnAlertResolveText}>Đã khắc phục</Text>
+                            </Pressable>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })
+              )}
             </ScrollView>
-          </View>
+          </Pressable>
         </Pressable>
       </Modal>
 
@@ -802,5 +962,89 @@ const styles = StyleSheet.create({
     backgroundColor: '#006E2D',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  notiCountBadge: {
+    position: 'absolute',
+    top: 3,
+    right: 3,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 3,
+    borderRadius: 8,
+    backgroundColor: '#BA1A1A',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notiCountText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  alertSummaryRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  summaryBadgeItem: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  summaryBadgeNum: {
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  summaryBadgeLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  alertStateTag: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  alertStateTagText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  alertActionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 6,
+  },
+  btnAlertAck: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+  },
+  btnAlertAckText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#92400E',
+  },
+  btnAlertResolve: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: '#006E2D',
+  },
+  btnAlertResolveText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
 });

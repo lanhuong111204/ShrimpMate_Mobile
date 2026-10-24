@@ -28,6 +28,7 @@ export interface FeedingRecord {
   id: string;
   pondId: string;
   deviceId: string;
+  scheduleId?: string | null;
   startedAt: string;
   requestedAmountKg: number;
   actualAmountKg: number;

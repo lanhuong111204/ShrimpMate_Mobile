@@ -77,27 +77,23 @@ export const authService = {
 
   /**
    * Đổi mật khẩu lần đầu dành cho Người nuôi nhận tài khoản cấp bởi Quản lý
+   * Sử dụng endpoint chuẩn PATCH /auth/change-password theo đặc tả Backend (Mục 3.10)
    */
   async firstTimeChangePassword(data: FirstTimePasswordChangeRequest): Promise<{ message: string }> {
-    try {
-      const response = await apiClient.patch<{ message: string }>(
-        Endpoints.auth.firstTimeChangePassword,
-        {
-          currentPassword: data.currentPassword,
-          newPassword: data.newPassword,
-        }
-      );
-      return response.data;
-    } catch {
-      // Fallback về changePassword thông thường nếu backend xử lý qua cùng endpoint
-      if (data.currentPassword) {
-        return this.changePassword({
-          currentPassword: data.currentPassword,
-          newPassword: data.newPassword,
-        });
-      }
-      throw new Error('Đổi mật khẩu lần đầu thất bại');
+    if (data.currentPassword) {
+      return this.changePassword({
+        currentPassword: data.currentPassword,
+        newPassword: data.newPassword,
+      });
     }
+    const response = await apiClient.patch<{ message: string }>(
+      Endpoints.auth.changePassword,
+      {
+        currentPassword: data.currentPassword || '',
+        newPassword: data.newPassword,
+      }
+    );
+    return response.data;
   },
 
   async register(data: RegisterRequest): Promise<AuthResponse> {
