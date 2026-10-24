@@ -12,6 +12,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useTheme } from '@/hooks/use-theme';
 import { AppHeader } from '@/components/common/app-header';
+import { NoAssignedPondState } from '@/components/common/no-assigned-pond';
 import { useFarm } from '@/context/farm-context';
 import { evaluateWaterMetricStatus } from '@/api/services/pond.service';
 import { StatusLevel } from '@/types/pond';
@@ -54,6 +55,7 @@ export default function ScreenTrayWater() {
   const colors = useTheme();
   const {
     farmInfo,
+    ponds,
     selectedPond,
     latestTelemetry,
     latestFis,
@@ -64,9 +66,11 @@ export default function ScreenTrayWater() {
     scanTray,
     isRefreshingPondData,
     refreshPondOperationalData,
+    refreshFarmsAndPonds,
   } = useFarm();
 
-  const pondDisplayName = selectedPond?.name || selectedPond?.code || farmInfo.selectedPond;
+  const hasAssignedPond = Boolean(selectedPond && ponds.length > 0);
+  const pondDisplayName = selectedPond?.name || selectedPond?.code || 'Không có ao giám sát';
 
   // 6 chỉ số nước thực tế từ GET /ponds/:pondId/telemetry/latest
   const doVal = latestTelemetry?.dissolvedOxygenMgL ?? farmInfo.dissolvedOxygen;
@@ -110,6 +114,29 @@ export default function ScreenTrayWater() {
   const salTheme = getGaugeColors(salStatus);
   const nh3Theme = getGaugeColors(nh3Status);
   const turbTheme = getGaugeColors(turbStatus);
+
+  if (!hasAssignedPond) {
+    return (
+      <View style={[styles.screen, { backgroundColor: colors.surface }]}>
+        <AppHeader subtitle="Giám Sát & Nhá Ăn" />
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshingPondData}
+              onRefresh={refreshFarmsAndPonds}
+              colors={['#EA580C']}
+              tintColor="#EA580C"
+            />
+          }>
+          <View style={styles.container}>
+            <NoAssignedPondState />
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.surface }]}>

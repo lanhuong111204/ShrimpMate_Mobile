@@ -2,6 +2,7 @@ import { apiClient } from '../client';
 import { Endpoints } from '../endpoints';
 import { AppConfig } from '@/constants/config';
 import { Storage } from '@/utils/storage';
+import { farmerService } from './farmer.service';
 import { CreateFarmRequest, Farm, UpdateFarmRequest } from '@/types/farm';
 import { CreatePondRequest, Pond, UpdatePondRequest } from '@/types/pond';
 
@@ -12,33 +13,93 @@ export interface PaginationParams {
   [key: string]: string | number | boolean | undefined;
 }
 
+/**
+ * Hàm bóc tách mảng dữ liệu an toàn từ nhiều định dạng response khác nhau của Backend
+ */
+function extractList<T>(raw: any, candidateKeys: string[]): T[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'object') {
+    for (const key of candidateKeys) {
+      if (Array.isArray(raw[key])) {
+        return raw[key];
+      }
+      if (raw[key] && typeof raw[key] === 'object' && Array.isArray(raw[key].data)) {
+        return raw[key].data;
+      }
+    }
+  }
+  return [];
+}
+
 export const farmPondService = {
   /**
-   * Lấy danh sách trang trại của Farmer hiện tại
-   * Hỗ trợ tự động cache vào Storage phục vụ chế độ offline bờ ao
+   * Lấy danh sách trang trại được phân công cho Farmer hiện tại
+   * - Gọi GET /farms và GET /farmers/:id/assignments
+   * - Nếu cả 2 đều trả về mảng rỗng hợp lệ (200 OK): trả về [] (Tài khoản mới chưa được phân công ao)
+   * - Chỉ khi mất mạng (Network Error): mới fallback về cache đã lưu của chính user đó
    */
-  async getFarms(params?: PaginationParams): Promise<Farm[]> {
+  async getFarms(params?: PaginationParams, userId?: string): Promise<Farm[]> {
+    const cacheKey = userId
+      ? `${AppConfig.storageKeys.cachedFarms}_${userId}`
+      : AppConfig.storageKeys.cachedFarms;
+
     try {
       const response = await apiClient.get<any>(Endpoints.farms.list, { params });
-      const result = response.data;
+      let farms = extractList<Farm>(response.data, ['data', 'farms', 'items', 'results']);
 
-      // Xử lý linh hoạt cả cấu trúc mảng trực tiếp và cấu trúc phân trang { data: Farm[], meta }
-      let farms: Farm[] = [];
-      if (Array.isArray(result)) {
-        farms = result;
-      } else if (result && Array.isArray(result.data)) {
-        farms = result.data;
+      // Nếu GET /farms trả về rỗng, kiểm tra danh sách phân công từ GET /farmers/:id/assignments
+      if (farms.length === 0) {
+        const assignments = await farmerService.getMyAssignments(userId);
+        if (assignments.length > 0) {
+          const farmMap = new Map<string, Farm>();
+          for (const assign of assignments as any[]) {
+            const fId = assign.farmId || assign.farm?.id;
+            if (fId && !farmMap.has(fId)) {
+              if (assign.farm && typeof assign.farm === 'object') {
+                farmMap.set(fId, {
+                  id: fId,
+                  ownerId: assign.farm.ownerId || assign.assignedBy || '',
+                  name: assign.farm.name || assign.farmName || 'Trang trại được phân công',
+                  address: assign.farm.address || '',
+                  status: assign.farm.status || 'active',
+                  createdAt: assign.farm.createdAt || assign.createdAt || new Date().toISOString(),
+                  updatedAt: assign.farm.updatedAt || new Date().toISOString(),
+                });
+              } else {
+                try {
+                  const detailRes = await apiClient.get<any>(Endpoints.farms.detail(fId));
+                  const fData = detailRes.data?.data || detailRes.data;
+                  if (fData && fData.id) {
+                    farmMap.set(fId, fData as Farm);
+                    continue;
+                  }
+                } catch {
+                  // Ignore và tạo từ metadata của assignment
+                }
+                farmMap.set(fId, {
+                  id: fId,
+                  ownerId: assign.assignedBy || '',
+                  name: assign.farmName || 'Trang trại được phân công',
+                  address: assign.farmAddress || '',
+                  status: 'active',
+                  createdAt: assign.createdAt || assign.assignedAt || new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                });
+              }
+            }
+          }
+          farms = Array.from(farmMap.values());
+        }
       }
 
-      // Lưu cache offline
-      if (farms.length > 0) {
-        await Storage.setJSON(AppConfig.storageKeys.cachedFarms, farms);
-      }
+      // Lưu cache (kể cả khi rỗng để phản ánh đúng trạng thái phân công hiện tại của user)
+      await Storage.setJSON(cacheKey, farms);
       return farms;
     } catch (error) {
-      // Khi mất sóng bờ ao, fallback đọc dữ liệu đã lưu trong bộ nhớ đệm
-      const cached = await Storage.getJSON<Farm[]>(AppConfig.storageKeys.cachedFarms);
-      if (cached && Array.isArray(cached) && cached.length > 0) {
+      // Khi mất sóng bờ ao (Network Error), đọc từ cache của đúng user đó
+      const cached = await Storage.getJSON<Farm[]>(cacheKey);
+      if (cached && Array.isArray(cached)) {
         return cached;
       }
       throw error;
@@ -78,30 +139,92 @@ export const farmPondService = {
   },
 
   /**
-   * Lấy danh sách ao nuôi thuộc một trang trại cụ thể
-   * Hỗ trợ tự động lưu cache phục vụ chế độ offline bờ ao
+   * Lấy danh sách ao nuôi được phân công trong một trang trại cụ thể
+   * - Kết hợp GET /farms/:farmId/ponds, GET /farms/:farmId và GET /farmers/:id/assignments
+   * - Nếu tài khoản chưa được gán ao nào (200 OK rỗng): trả về []
    */
-  async getPondsByFarm(farmId: string, params?: PaginationParams): Promise<Pond[]> {
+  async getPondsByFarm(
+    farmId: string,
+    params?: PaginationParams,
+    userId?: string
+  ): Promise<Pond[]> {
+    const cacheKey = userId
+      ? `${AppConfig.storageKeys.cachedPonds}_${userId}_${farmId}`
+      : `${AppConfig.storageKeys.cachedPonds}_${farmId}`;
+
     try {
       const response = await apiClient.get<any>(Endpoints.ponds.listByFarm(farmId), { params });
-      const result = response.data;
+      let ponds = extractList<Pond>(response.data, ['data', 'ponds', 'items', 'results']);
 
-      let ponds: Pond[] = [];
-      if (Array.isArray(result)) {
-        ponds = result;
-      } else if (result && Array.isArray(result.data)) {
-        ponds = result.data;
+      // Bước dự phòng 1: Kiểm tra trong GET /farms/:id (nếu danh sách ao đính kèm trong chi tiết farm)
+      if (ponds.length === 0) {
+        try {
+          const farmDetailRes = await apiClient.get<any>(Endpoints.farms.detail(farmId));
+          const farmObj = farmDetailRes.data?.data || farmDetailRes.data;
+          if (farmObj && Array.isArray(farmObj.ponds) && farmObj.ponds.length > 0) {
+            ponds = farmObj.ponds;
+          }
+        } catch {
+          // Ignore
+        }
       }
 
-      // Lưu cache ao nuôi theo farm
-      if (ponds.length > 0) {
-        await Storage.setJSON(`${AppConfig.storageKeys.cachedPonds}_${farmId}`, ponds);
+      // Bước dự phòng 2: Kiểm tra từ GET /farmers/:id/assignments
+      if (ponds.length === 0) {
+        const assignments = await farmerService.getMyAssignments(userId);
+        const farmAssignments = assignments.filter(
+          (a: any) => !a.farmId || a.farmId === farmId || a.farm?.id === farmId
+        );
+
+        const pondMap = new Map<string, Pond>();
+        for (const assign of farmAssignments as any[]) {
+          const pId = assign.pondId || assign.pond?.id;
+          if (pId && !pondMap.has(pId)) {
+            if (assign.pond && typeof assign.pond === 'object') {
+              pondMap.set(pId, {
+                id: pId,
+                farmId: assign.farmId || farmId,
+                code: assign.pond.code || 'AO-01',
+                name: assign.pond.name || assign.pondName || 'Ao nuôi được phân công',
+                areaM2: Number(assign.pond.areaM2) || 3000,
+                status: assign.pond.status || 'active',
+                createdAt: assign.pond.createdAt || assign.createdAt || new Date().toISOString(),
+                updatedAt: assign.pond.updatedAt || new Date().toISOString(),
+              });
+            } else {
+              try {
+                const pRes = await apiClient.get<any>(Endpoints.ponds.detailInFarm(farmId, pId));
+                const pData = pRes.data?.data || pRes.data;
+                if (pData && pData.id) {
+                  pondMap.set(pId, pData as Pond);
+                  continue;
+                }
+              } catch {
+                // Ignore
+              }
+              pondMap.set(pId, {
+                id: pId,
+                farmId: assign.farmId || farmId,
+                code: assign.pondCode || `AO-0${pondMap.size + 1}`,
+                name: assign.pondName || `Ao nuôi số ${pondMap.size + 1}`,
+                areaM2: Number(assign.areaM2) || 3000,
+                status: 'active',
+                createdAt: assign.createdAt || assign.assignedAt || new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              });
+            }
+          }
+        }
+        if (pondMap.size > 0) {
+          ponds = Array.from(pondMap.values());
+        }
       }
+
+      await Storage.setJSON(cacheKey, ponds);
       return ponds;
     } catch (error) {
-      // Fallback cache offline
-      const cached = await Storage.getJSON<Pond[]>(`${AppConfig.storageKeys.cachedPonds}_${farmId}`);
-      if (cached && Array.isArray(cached) && cached.length > 0) {
+      const cached = await Storage.getJSON<Pond[]>(cacheKey);
+      if (cached && Array.isArray(cached)) {
         return cached;
       }
       throw error;
@@ -136,7 +259,9 @@ export const farmPondService = {
    * Xóa ao nuôi
    */
   async deletePond(farmId: string, id: string): Promise<{ message: string }> {
-    const response = await apiClient.delete<{ message: string }>(Endpoints.ponds.deleteInFarm(farmId, id));
+    const response = await apiClient.delete<{ message: string }>(
+      Endpoints.ponds.deleteInFarm(farmId, id)
+    );
     return response.data;
   },
 

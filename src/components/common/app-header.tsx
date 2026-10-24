@@ -77,12 +77,12 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
     router.replace('/(auth)/login');
   };
 
-  // Tên hiển thị trên nút Pill ao nuôi
+  // Tên hiển thị trên nút Pill ao nuôi (đảm bảo đồng bộ 100% với danh sách trong Modal)
+  const hasAssignedPond = Boolean(selectedPond || ponds.length > 0);
   const displayPondName =
     selectedPond?.name ||
     selectedPond?.code ||
-    farmInfo.selectedPond ||
-    'Chọn Ao Nuôi';
+    (ponds.length > 0 ? ponds[0].name || ponds[0].code : 'Không có ao');
 
   return (
     <View
@@ -116,7 +116,12 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
               styles.pondPill,
               { opacity: pressed ? 0.85 : 1 },
             ]}>
-            <View style={styles.onlineDot} />
+            <View
+              style={[
+                styles.onlineDot,
+                !hasAssignedPond && { backgroundColor: '#FDE047' },
+              ]}
+            />
             <Text numberOfLines={1} style={styles.pondPillText}>
               {displayPondName}
             </Text>

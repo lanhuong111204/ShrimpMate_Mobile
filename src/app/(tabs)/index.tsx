@@ -15,6 +15,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/use-theme';
 import { AppHeader } from '@/components/common/app-header';
+import { NoAssignedPondState } from '@/components/common/no-assigned-pond';
 import { useFarm } from '@/context/farm-context';
 import { EvaluateSafetyResponse } from '@/types/safety-rule';
 
@@ -23,6 +24,7 @@ export default function ScreenFeedingLog() {
   const router = useRouter();
   const {
     farmInfo,
+    ponds,
     selectedPond,
     latestTelemetry,
     latestAiRecommendation,
@@ -33,6 +35,7 @@ export default function ScreenFeedingLog() {
     triggerQuickFeed,
     isRefreshingPondData,
     refreshPondOperationalData,
+    refreshFarmsAndPonds,
   } = useFarm();
 
   const [showExtraModal, setShowExtraModal] = useState(false);
@@ -41,6 +44,30 @@ export default function ScreenFeedingLog() {
   const [safetyPreview, setSafetyPreview] = useState<EvaluateSafetyResponse | null>(null);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [isSubmittingExtra, setIsSubmittingExtra] = useState(false);
+
+  const hasAssignedPond = Boolean(selectedPond && ponds.length > 0);
+  if (!hasAssignedPond) {
+    return (
+      <View style={[styles.screen, { backgroundColor: colors.surface }]}>
+        <AppHeader subtitle="Lịch Cữ Nuôi Tôm" />
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshingPondData}
+              onRefresh={refreshFarmsAndPonds}
+              colors={['#EA580C']}
+              tintColor="#EA580C"
+            />
+          }>
+          <View style={styles.container}>
+            <NoAssignedPondState />
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
 
   // Tìm cữ gợi ý AI hoặc cữ chiều
   const aiMeal = feedMeals.find((m) => m.status === 'ai_suggested' || m.id === 'meal-3') || feedMeals[0];

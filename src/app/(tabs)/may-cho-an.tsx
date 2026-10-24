@@ -14,12 +14,14 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/use-theme';
 import { AppHeader } from '@/components/common/app-header';
+import { NoAssignedPondState } from '@/components/common/no-assigned-pond';
 import { useFarm } from '@/context/farm-context';
 import { EvaluateSafetyResponse } from '@/types/safety-rule';
 
 export default function ScreenLiveFeeder() {
   const colors = useTheme();
   const {
+    ponds,
     selectedPond,
     farmInfo,
     latestTelemetry,
@@ -39,6 +41,7 @@ export default function ScreenLiveFeeder() {
     resetEmergencyStop,
     isRefreshingPondData,
     refreshPondOperationalData,
+    refreshFarmsAndPonds,
   } = useFarm();
 
   const [testThrowTimer, setTestThrowTimer] = useState<number | null>(null);
@@ -49,6 +52,8 @@ export default function ScreenLiveFeeder() {
   const [safetyPreview, setSafetyPreview] = useState<EvaluateSafetyResponse | null>(null);
   const [isEvaluatingSafety, setIsEvaluatingSafety] = useState(false);
   const [isTriggeringFeed, setIsTriggeringFeed] = useState(false);
+
+  const hasAssignedPond = Boolean(selectedPond && ponds.length > 0);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | null = null;
@@ -64,6 +69,29 @@ export default function ScreenLiveFeeder() {
       if (interval) clearInterval(interval);
     };
   }, [testThrowTimer]);
+
+  if (!hasAssignedPond) {
+    return (
+      <View style={[styles.screen, { backgroundColor: colors.surface }]}>
+        <AppHeader subtitle="Trạm Ăn Tự Động" />
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshingPondData}
+              onRefresh={refreshFarmsAndPonds}
+              colors={['#EA580C']}
+              tintColor="#EA580C"
+            />
+          }>
+          <View style={styles.container}>
+            <NoAssignedPondState />
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
 
   const handleOpenQuickFeedModal = async (defaultKg = '5.0') => {
     setQuickFeedKg(defaultKg);

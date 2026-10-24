@@ -493,7 +493,7 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
     setIsLoadingFarms(true);
     setFarmError(null);
     try {
-      const farmsList = await farmPondService.getFarms();
+      const farmsList = await farmPondService.getFarms(undefined, user?.id);
       setFarms(farmsList);
 
       if (farmsList.length > 0) {
@@ -504,7 +504,11 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
 
         setIsLoadingPonds(true);
         try {
-          const pondsList = await farmPondService.getPondsByFarm(currentFarm.id);
+          const pondsList = await farmPondService.getPondsByFarm(
+            currentFarm.id,
+            undefined,
+            user?.id
+          );
           setPonds(pondsList);
 
           if (pondsList.length > 0) {
@@ -524,6 +528,21 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
             await loadPondOperationalData(currentPond.id);
           } else {
             setSelectedPond(null);
+            setLatestTelemetry(null);
+            setLatestFis(null);
+            setLatestAiRecommendation(null);
+            setPondDevices([]);
+            setFeedingSchedules([]);
+            setFeedingRecords([]);
+            setAlerts([]);
+            setAlertSummary(null);
+            setFarmInfo((prev) => ({
+              ...prev,
+              farmerName: user?.fullName || prev.farmerName,
+              farmName: currentFarm.name,
+              location: currentFarm.address || prev.location,
+              selectedPond: 'Chưa có ao giám sát',
+            }));
           }
         } finally {
           setIsLoadingPonds(false);
@@ -532,6 +551,20 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
         setSelectedFarm(null);
         setPonds([]);
         setSelectedPond(null);
+        setLatestTelemetry(null);
+        setLatestFis(null);
+        setLatestAiRecommendation(null);
+        setPondDevices([]);
+        setFeedingSchedules([]);
+        setFeedingRecords([]);
+        setAlerts([]);
+        setAlertSummary(null);
+        setFarmInfo((prev) => ({
+          ...prev,
+          farmerName: user?.fullName || prev.farmerName,
+          farmName: 'Chưa được phân công trang trại',
+          selectedPond: 'Chưa có ao giám sát',
+        }));
       }
     } catch (err: any) {
       setFarmError(err?.message || 'Không thể tải danh sách trang trại được phân công');
@@ -553,7 +586,11 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
 
     setIsLoadingPonds(true);
     try {
-      const pondsList = await farmPondService.getPondsByFarm(targetFarm.id);
+      const pondsList = await farmPondService.getPondsByFarm(
+        targetFarm.id,
+        undefined,
+        user?.id
+      );
       setPonds(pondsList);
 
       if (pondsList.length > 0) {
