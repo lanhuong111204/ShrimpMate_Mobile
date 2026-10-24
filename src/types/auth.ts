@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'farmer';
+export type UserRole = 'admin' | 'manager' | 'farmer';
 
 export interface User {
   id: string;
@@ -10,12 +10,52 @@ export interface User {
   role: UserRole | string;
   isActive: boolean;
   avatarUrl?: string;
+  managerId?: string | null;
+  isFirstLogin?: boolean;
+  assignedFarmsCount?: number;
+  assignedPondsCount?: number;
   createdAt: string;
   updatedAt?: string;
 }
 
 export interface FarmerCheckResponse {
   message: string;
+}
+
+export interface ManagerCheckResponse {
+  message: string;
+}
+
+export interface AdminCheckResponse {
+  message: string;
+}
+
+export interface FarmerAssignment {
+  id: string;
+  farmerId: string;
+  farmId: string;
+  pondId?: string | null;
+  assignedAt: string;
+  assignedBy?: string;
+  farmName?: string;
+  pondName?: string;
+}
+
+export interface FarmerUserSummary {
+  id: string;
+  fullName: string;
+  email: string;
+  phoneNumber?: string | null;
+  isActive: boolean;
+  managerId?: string | null;
+  isFirstLogin?: boolean;
+  assignments?: FarmerAssignment[];
+  createdAt: string;
+}
+
+export interface FirstTimePasswordChangeRequest {
+  currentPassword?: string;
+  newPassword: string;
 }
 
 export interface VerifyResetOtpRequest {

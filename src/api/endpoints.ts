@@ -20,7 +20,9 @@ export const Endpoints = {
     me: '/auth/me',
     profile: '/auth/profile',
     changePassword: '/auth/change-password',
+    firstTimeChangePassword: '/auth/first-time-change-password',
     farmerCheck: '/auth/farmer-check',
+    managerCheck: '/auth/manager-check',
     adminCheck: '/auth/admin-check',
   },
 
@@ -137,5 +139,18 @@ export const Endpoints = {
   users: {
     profile: '/auth/profile',
     updateProfile: '/auth/profile',
+  },
+
+  // 15. Farmer Management & Assignments (/farmers)
+  farmers: {
+    list: '/farmers',
+    create: '/farmers',
+    detail: (id: string) => `/farmers/${id}`,
+    update: (id: string) => `/farmers/${id}`,
+    delete: (id: string) => `/farmers/${id}`,
+    assignments: (id: string) => `/farmers/${id}/assignments`,
+    assign: (id: string) => `/farmers/${id}/assignments`,
+    removeAssignment: (id: string, pondId: string) => `/farmers/${id}/assignments/${pondId}`,
+    myAssignments: '/farmers/me/assignments',
   },
 } as const;

@@ -3,10 +3,13 @@ import { Endpoints } from '../endpoints';
 import { AppConfig } from '@/constants/config';
 import { Storage } from '@/utils/storage';
 import {
+  AdminCheckResponse,
   AuthResponse,
   ChangePasswordRequest,
   FarmerCheckResponse,
+  FirstTimePasswordChangeRequest,
   LoginRequest,
+  ManagerCheckResponse,
   RegisterRequest,
   ResetPasswordRequest,
   UpdateProfileRequest,
@@ -18,10 +21,28 @@ import {
 export const authService = {
   /**
    * Xác thực tài khoản có quyền Người nuôi (Farmer) hay không
-   * Trả về 200 OK nếu là Farmer, 403 Forbidden nếu là Admin
+   * Trả về 200 OK nếu là Farmer, 403 Forbidden nếu là Admin hoặc Manager
    */
   async checkFarmerRole(): Promise<FarmerCheckResponse> {
     const response = await apiClient.get<FarmerCheckResponse>(Endpoints.auth.farmerCheck);
+    return response.data;
+  },
+
+  /**
+   * Xác thực tài khoản có quyền Quản lý đầm (Manager) hay không
+   * Trả về 200 OK nếu là Manager
+   */
+  async checkManagerRole(): Promise<ManagerCheckResponse> {
+    const response = await apiClient.get<ManagerCheckResponse>(Endpoints.auth.managerCheck);
+    return response.data;
+  },
+
+  /**
+   * Xác thực tài khoản có quyền Quản trị viên (Admin) hay không
+   * Trả về 200 OK nếu là Admin
+   */
+  async checkAdminRole(): Promise<AdminCheckResponse> {
+    const response = await apiClient.get<AdminCheckResponse>(Endpoints.auth.adminCheck);
     return response.data;
   },
 
@@ -52,6 +73,31 @@ export const authService = {
       }
     );
     return response.data;
+  },
+
+  /**
+   * Đổi mật khẩu lần đầu dành cho Người nuôi nhận tài khoản cấp bởi Quản lý
+   */
+  async firstTimeChangePassword(data: FirstTimePasswordChangeRequest): Promise<{ message: string }> {
+    try {
+      const response = await apiClient.patch<{ message: string }>(
+        Endpoints.auth.firstTimeChangePassword,
+        {
+          currentPassword: data.currentPassword,
+          newPassword: data.newPassword,
+        }
+      );
+      return response.data;
+    } catch {
+      // Fallback về changePassword thông thường nếu backend xử lý qua cùng endpoint
+      if (data.currentPassword) {
+        return this.changePassword({
+          currentPassword: data.currentPassword,
+          newPassword: data.newPassword,
+        });
+      }
+      throw new Error('Đổi mật khẩu lần đầu thất bại');
+    }
   },
 
   async register(data: RegisterRequest): Promise<AuthResponse> {
