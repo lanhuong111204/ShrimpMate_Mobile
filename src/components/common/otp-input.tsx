@@ -4,7 +4,7 @@ import {
   View,
   TextInput,
   NativeSyntheticEvent,
-  TextInputKeyPressEventData,
+  // keypress event type
 } from 'react-native';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -24,7 +24,7 @@ export function OtpInput({
   length = 6,
 }: OtpInputProps) {
   const colors = useTheme();
-  const inputsRef = useRef<(TextInput | null)[]>([]);
+  const inputsRef = useRef<any[]>([]);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
 
   const isLargeCount = length >= 6;
@@ -57,7 +57,7 @@ export function OtpInput({
   };
 
   const handleKeyPress = (
-    e: NativeSyntheticEvent<TextInputKeyPressEventData>,
+    e: NativeSyntheticEvent<{ key: string }>,
     index: number
   ) => {
     if (e.nativeEvent.key === 'Backspace') {
