@@ -5,8 +5,6 @@ import {
   View,
   Pressable,
   ScrollView,
-  Alert,
-  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -18,50 +16,20 @@ export default function ScreenRegisterGuide() {
   const colors = useTheme();
   const router = useRouter();
 
-  const handleCallHotline = () => {
-    Alert.alert(
-      'Tổng Đài Hỗ Trợ 24/7',
-      'Đang kết nối tới tổng đài hỗ trợ tài khoản và kết nối ao nuôi ShrimpMate: 1800 6868 (Miễn hoàn toàn cước gọi)',
-      [
-        { text: 'Hủy', style: 'cancel' },
-        {
-          text: 'Gọi 1800 6868',
-          onPress: () => {
-            Linking.openURL('tel:18006868').catch(() => {
-              Alert.alert('Thông Báo', 'Không thể tự động quay số trên thiết bị này. Vui lòng gọi 1800 6868.');
-            });
-          },
-        },
-      ]
-    );
-  };
-
-  const handleOpenManagerWeb = () => {
-    Alert.alert(
-      'Hệ Thống Quản Lý Trang Trại (Manager Web)',
-      'Hệ thống Web dành riêng cho Quản lý trang trại để quản lý ao nuôi và phân công Người nuôi.',
-      [
-        { text: 'Đóng', style: 'cancel' },
-        {
-          text: 'Tìm Hiểu Thêm',
-          onPress: () => {
-            Alert.alert(
-              'Cổng Quản Lý Web',
-              'Vui lòng truy cập trên trình duyệt máy tính theo địa chỉ cổng Quản lý của trang trại bạn.'
-            );
-          },
-        },
-      ]
-    );
-  };
-
   return (
-    <View style={[styles.screen, { backgroundColor: colors.surface }]}>
+    <View
+      style={[
+        styles.screen,
+        {
+          backgroundColor: colors.surface,
+          paddingTop: Math.max(insets.top, 12),
+        },
+      ]}>
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
           {
-            paddingTop: Math.max(insets.top, 16),
+            paddingTop: 8,
             paddingBottom: Math.max(insets.bottom, 24) + 20,
           },
         ]}
@@ -195,77 +163,8 @@ export default function ScreenRegisterGuide() {
             </View>
           </View>
 
-          {/* For Farm Managers Card */}
-          <View
-            style={[
-              styles.managerCard,
-              {
-                backgroundColor: colors.surfaceContainerLowest,
-                borderColor: colors.outlineVariant + '40',
-              },
-            ]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <View style={styles.managerIconBox}>
-                <MaterialIcons name="business" size={24} color="#0058BE" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.managerCardTitle, { color: colors.onSurface }]}>
-                  Bạn là Quản lý trang trại?
-                </Text>
-                <Text style={[styles.managerCardSub, { color: colors.onSurfaceVariant }]}>
-                  Đăng ký tài khoản Quản lý & thiết lập vuông tôm trên Web
-                </Text>
-              </View>
-            </View>
-            <Pressable
-              onPress={handleOpenManagerWeb}
-              style={({ pressed }) => [
-                styles.btnManagerWeb,
-                { opacity: pressed ? 0.85 : 1 },
-              ]}>
-              <MaterialIcons name="open-in-browser" size={18} color="#0058BE" />
-              <Text style={styles.btnManagerWebText}>HƯỚNG DẪN DÀNH CHO QUẢN LÝ</Text>
-            </Pressable>
-          </View>
-
-          {/* Hotline Support Card */}
-          <View
-            style={[
-              styles.hotlineCard,
-              {
-                backgroundColor: colors.inverseSurface,
-              },
-            ]}>
-            <View style={{ flex: 1, gap: 4 }}>
-              <View style={styles.hotlineTagRow}>
-                <View style={[styles.signalDot, { backgroundColor: colors.secondaryFixed }]} />
-                <Text style={[styles.hotlineTag, { color: colors.inverseOnSurface }]}>
-                  TỔNG ĐÀI TRỢ GIÚP 24/7
-                </Text>
-              </View>
-              <Text style={[styles.hotlineTitle, { color: colors.inverseOnSurface }]}>
-                Cần hỗ trợ nhận tài khoản ao nuôi?
-              </Text>
-              <Text style={[styles.hotlineSub, { color: colors.primaryFixed }]}>
-                Tổng đài hỗ trợ ShrimpMate túc trực miễn cước gọi
-              </Text>
-            </View>
-
-            <Pressable
-              onPress={handleCallHotline}
-              style={({ pressed }) => [
-                styles.hotlineCallBtn,
-                { backgroundColor: colors.secondaryFixed, opacity: pressed ? 0.9 : 1 },
-              ]}>
-              <MaterialIcons name="call" size={18} color={colors.onSecondaryFixed} />
-              <Text style={[styles.hotlineCallNum, { color: colors.onSecondaryFixed }]}>
-                1800 6868
-              </Text>
-            </Pressable>
-          </View>
-
-          {/* Primary CTA Buttons */}
-          <View style={{ gap: 12, marginTop: 8 }}>
+          {/* Primary CTA Button */}
+          <View style={{ marginTop: 8 }}>
             <Pressable
               onPress={() => router.replace('/(auth)/login')}
               style={({ pressed }) => [
@@ -275,27 +174,7 @@ export default function ScreenRegisterGuide() {
               <MaterialIcons name="login" size={20} color="#FFFFFF" />
               <Text style={styles.btnPrimaryText}>ĐÃ CÓ TÀI KHOẢN • ĐĂNG NHẬP NGAY</Text>
             </Pressable>
-
-            <Pressable
-              onPress={handleCallHotline}
-              style={({ pressed }) => [
-                styles.btnSecondary,
-                {
-                  backgroundColor: colors.surfaceContainerLowest,
-                  borderColor: colors.outlineVariant + '60',
-                  opacity: pressed ? 0.85 : 1,
-                },
-              ]}>
-              <MaterialIcons name="support-agent" size={20} color="#EA580C" />
-              <Text style={[styles.btnSecondaryText, { color: '#EA580C' }]}>
-                GỌI TỔNG ĐÀI HỖ TRỢ MIỄN PHÍ
-              </Text>
-            </Pressable>
           </View>
-
-          <Text style={[styles.footerText, { color: colors.onSurfaceVariant }]}>
-            Hệ thống Quản lý Bờ ao Thông minh ShrimpMate • Chuẩn VietGAP
-          </Text>
         </View>
       </ScrollView>
     </View>

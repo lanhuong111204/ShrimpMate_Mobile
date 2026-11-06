@@ -57,19 +57,34 @@ export const pondService = {
    * Endpoint: GET /ponds/:pondId/telemetry/latest
    */
   async getLatestTelemetry(pondId: string): Promise<TelemetryReading | null> {
+    const normalizeTelemetry = (raw: any): TelemetryReading | null => {
+      if (!raw || typeof raw !== 'object') return null;
+      const item = raw.data && typeof raw.data === 'object' ? raw.data : raw;
+      if (item.ph === undefined || item.ph === null || isNaN(Number(item.ph))) return null;
+      return {
+        ...item,
+        ph: Number(item.ph),
+        dissolvedOxygenMgL: Number(item.dissolvedOxygenMgL ?? item.do ?? 0),
+        temperatureC: Number(item.temperatureC ?? item.temperature ?? 0),
+        salinityPpt: Number(item.salinityPpt ?? item.salinity ?? 0),
+        ammoniaMgL: Number(item.ammoniaMgL ?? item.nh3 ?? 0),
+        turbidityNtu: Number(item.turbidityNtu ?? item.turbidity ?? 0),
+      };
+    };
+
     try {
-      const response = await apiClient.get<TelemetryReading>(Endpoints.telemetry.latest(pondId));
-      const data = response.data;
-      if (data && typeof data.ph === 'number') {
-        await Storage.setJSON(`${AppConfig.storageKeys.cachedTelemetry}_${pondId}`, data);
-        return data;
+      const response = await apiClient.get<any>(Endpoints.telemetry.latest(pondId));
+      const normalized = normalizeTelemetry(response.data);
+      if (normalized) {
+        await Storage.setJSON(`${AppConfig.storageKeys.cachedTelemetry}_${pondId}`, normalized);
+        return normalized;
       }
       return null;
     } catch {
-      const cached = await Storage.getJSON<TelemetryReading>(
+      const cached = await Storage.getJSON<any>(
         `${AppConfig.storageKeys.cachedTelemetry}_${pondId}`
       );
-      return cached || null;
+      return normalizeTelemetry(cached);
     }
   },
 
@@ -96,32 +111,50 @@ export const pondService = {
    * Kiểm tra cờ isStale hoặc ageSeconds > 120s
    */
   async getLatestFis(pondId: string): Promise<LatestFisResponse> {
-    try {
-      const response = await apiClient.get<LatestFisResponse>(Endpoints.camera.latestFis(pondId));
-      const data = response.data;
-      if (data && typeof data.hasData === 'boolean') {
-        // Đảm bảo tính nhất quán của cờ isStale nếu ageSeconds > 120
-        if (data.status && typeof data.status.ageSeconds === 'number' && data.status.ageSeconds > 120) {
+    const normalizeFis = (raw: any): LatestFisResponse | null => {
+      if (!raw || typeof raw !== 'object') return null;
+      const data = raw.data && typeof raw.data === 'object' && 'hasData' in raw.data ? raw.data : raw;
+      if (typeof data.hasData !== 'boolean') return null;
+      if (data.status) {
+        data.status = {
+          ...data.status,
+          fisScore: Number(data.status.fisScore) || 0,
+          appetiteLevel: (Number(data.status.appetiteLevel) || 0) as any,
+          remainingFeedPercent: Number(data.status.remainingFeedPercent) || 0,
+          shrimpDensity: Number(data.status.shrimpDensity) || 0,
+          consumptionVelocity: Number(data.status.consumptionVelocity) || 0,
+          ageSeconds: Number(data.status.ageSeconds) || 0,
+        };
+        if (data.status.ageSeconds > 120) {
           data.status.isStale = true;
         }
-        await Storage.setJSON(`${AppConfig.storageKeys.cachedFis}_${pondId}`, data);
-        return data;
+      }
+      return data as LatestFisResponse;
+    };
+
+    try {
+      const response = await apiClient.get<any>(Endpoints.camera.latestFis(pondId));
+      const normalized = normalizeFis(response.data);
+      if (normalized) {
+        await Storage.setJSON(`${AppConfig.storageKeys.cachedFis}_${pondId}`, normalized);
+        return normalized;
       }
       return { hasData: false, pondId };
     } catch {
-      const cached = await Storage.getJSON<LatestFisResponse>(
+      const cached = await Storage.getJSON<any>(
         `${AppConfig.storageKeys.cachedFis}_${pondId}`
       );
-      if (cached) {
-        if (cached.status?.timestamp) {
+      const normalized = normalizeFis(cached);
+      if (normalized) {
+        if (normalized.status?.timestamp) {
           const ageSec = Math.max(
             0,
-            Math.floor((Date.now() - new Date(cached.status.timestamp).getTime()) / 1000)
+            Math.floor((Date.now() - new Date(normalized.status.timestamp).getTime()) / 1000)
           );
-          cached.status.ageSeconds = ageSec;
-          cached.status.isStale = ageSec > 120;
+          normalized.status.ageSeconds = ageSec;
+          normalized.status.isStale = ageSec > 120;
         }
-        return cached;
+        return normalized;
       }
 
       return {
@@ -143,14 +176,16 @@ export const pondService = {
       hasData: true,
       pondId: payload.pondId,
       status: {
-        fisScore: summary?.fisScore ?? log?.fisScore ?? 0,
-        appetiteLevel: summary?.appetiteLevel ?? log?.appetiteLevel ?? 0,
+        fisScore: Number(summary?.fisScore ?? log?.fisScore ?? 0) || 0,
+        appetiteLevel: (Number(summary?.appetiteLevel ?? log?.appetiteLevel ?? 0) || 0) as any,
         appetiteLevelDescription: summary?.appetiteLevelDescription ?? 'Chưa xác định',
         remainingFeedPercent:
-          summary?.feedLeftoverPercent ??
-          (typeof log?.remainingFeedAreaRt === 'number' ? Math.round(log.remainingFeedAreaRt * 100) : 0),
-        shrimpDensity: summary?.shrimpDensity ?? log?.shrimpDensityDt ?? 0,
-        consumptionVelocity: summary?.consumptionVelocity ?? log?.feedConsumptionVelocityVt ?? 0,
+          Number(
+            summary?.feedLeftoverPercent ??
+              (log?.remainingFeedAreaRt !== undefined ? Math.round(Number(log.remainingFeedAreaRt) * 100) : 0)
+          ) || 0,
+        shrimpDensity: Number(summary?.shrimpDensity ?? log?.shrimpDensityDt ?? 0) || 0,
+        consumptionVelocity: Number(summary?.consumptionVelocity ?? log?.feedConsumptionVelocityVt ?? 0) || 0,
         timestamp: log?.timestamp || new Date().toISOString(),
         ageSeconds: 1,
         isStale: false,
@@ -165,32 +200,54 @@ export const pondService = {
    * Endpoint: GET /ponds/:pondId/ai/recommendations/latest
    */
   async getLatestAiRecommendation(pondId: string): Promise<AiRecommendation | null> {
+    const normalizeAi = (raw: any): AiRecommendation | null => {
+      if (!raw || typeof raw !== 'object') return null;
+      const item = raw.data && typeof raw.data === 'object' ? raw.data : raw;
+      if (
+        item.predictedFeedAmountKg === undefined ||
+        item.predictedFeedAmountKg === null ||
+        isNaN(Number(item.predictedFeedAmountKg))
+      ) {
+        return null;
+      }
+      return {
+        ...item,
+        predictedFeedAmountKg: Number(item.predictedFeedAmountKg),
+        spreadRateKgPerMinute:
+          item.spreadRateKgPerMinute !== undefined ? Number(item.spreadRateKgPerMinute) : undefined,
+        biomassKg: item.biomassKg !== undefined ? Number(item.biomassKg) : undefined,
+        confidence: item.confidence !== undefined ? Number(item.confidence) : undefined,
+      };
+    };
+
     try {
-      const response = await apiClient.get<AiRecommendation>(
+      const response = await apiClient.get<any>(
         Endpoints.ai.recommendationsLatest(pondId)
       );
-      if (response.data && typeof response.data.predictedFeedAmountKg === 'number') {
-        await Storage.setJSON(`${AppConfig.storageKeys.cachedAiRec}_${pondId}`, response.data);
-        return response.data;
+      const normalized = normalizeAi(response.data);
+      if (normalized) {
+        await Storage.setJSON(`${AppConfig.storageKeys.cachedAiRec}_${pondId}`, normalized);
+        return normalized;
       }
       return null;
     } catch {
       try {
         // Fallback thử đường dẫn tương thích tài liệu 1 nếu cần
-        const alt = await apiClient.get<AiRecommendation>(
+        const alt = await apiClient.get<any>(
           Endpoints.ai.legacyRecommendations(pondId)
         );
-        if (alt.data && typeof alt.data.predictedFeedAmountKg === 'number') {
-          await Storage.setJSON(`${AppConfig.storageKeys.cachedAiRec}_${pondId}`, alt.data);
-          return alt.data;
+        const normalizedAlt = normalizeAi(alt.data);
+        if (normalizedAlt) {
+          await Storage.setJSON(`${AppConfig.storageKeys.cachedAiRec}_${pondId}`, normalizedAlt);
+          return normalizedAlt;
         }
       } catch {
         // Ignore
       }
-      const cached = await Storage.getJSON<AiRecommendation>(
+      const cached = await Storage.getJSON<any>(
         `${AppConfig.storageKeys.cachedAiRec}_${pondId}`
       );
-      return cached || null;
+      return normalizeAi(cached);
     }
   },
 
@@ -223,23 +280,32 @@ export const pondService = {
    * 9.1. Danh sách lịch cho ăn của ao (GET /ponds/:pondId/feeding-schedules)
    */
   async getFeedingSchedules(pondId: string): Promise<FeedingSchedule[]> {
+    const normalizeSchedules = (items: any[]): FeedingSchedule[] =>
+      items.map((sch) => ({
+        ...sch,
+        feedAmountKg: Number(sch.feedAmountKg) || 0,
+        spreadRateKgPerMinute:
+          sch.spreadRateKgPerMinute !== undefined ? Number(sch.spreadRateKgPerMinute) || 0 : 1.5,
+      }));
+
     try {
       const response = await apiClient.get<any>(Endpoints.feedings.schedules(pondId));
       const raw = response.data;
-      const list: FeedingSchedule[] = Array.isArray(raw)
+      const list: any[] = Array.isArray(raw)
         ? raw
         : raw && Array.isArray(raw.data)
         ? raw.data
         : [];
-      if (list.length > 0) {
-        await Storage.setJSON(`${AppConfig.storageKeys.cachedSchedules}_${pondId}`, list);
+      const normalized = normalizeSchedules(list);
+      if (normalized.length > 0) {
+        await Storage.setJSON(`${AppConfig.storageKeys.cachedSchedules}_${pondId}`, normalized);
       }
-      return list;
+      return normalized;
     } catch {
-      const cached = await Storage.getJSON<FeedingSchedule[]>(
+      const cached = await Storage.getJSON<any[]>(
         `${AppConfig.storageKeys.cachedSchedules}_${pondId}`
       );
-      return cached || [];
+      return Array.isArray(cached) ? normalizeSchedules(cached) : [];
     }
   },
 
@@ -247,23 +313,31 @@ export const pondService = {
    * 9.4. Lịch sử nhật ký các lần cho ăn (GET /ponds/:pondId/feeding-records)
    */
   async getFeedingRecords(pondId: string): Promise<FeedingRecord[]> {
+    const normalizeRecords = (items: any[]): FeedingRecord[] =>
+      items.map((rec) => ({
+        ...rec,
+        requestedAmountKg: Number(rec.requestedAmountKg) || 0,
+        actualAmountKg: Number(rec.actualAmountKg) || 0,
+      }));
+
     try {
       const response = await apiClient.get<any>(Endpoints.feedings.records(pondId));
       const raw = response.data;
-      const list: FeedingRecord[] = Array.isArray(raw)
+      const list: any[] = Array.isArray(raw)
         ? raw
         : raw && Array.isArray(raw.data)
         ? raw.data
         : [];
-      if (list.length > 0) {
-        await Storage.setJSON(`${AppConfig.storageKeys.cachedRecords}_${pondId}`, list);
+      const normalized = normalizeRecords(list);
+      if (normalized.length > 0) {
+        await Storage.setJSON(`${AppConfig.storageKeys.cachedRecords}_${pondId}`, normalized);
       }
-      return list;
+      return normalized;
     } catch {
-      const cached = await Storage.getJSON<FeedingRecord[]>(
+      const cached = await Storage.getJSON<any[]>(
         `${AppConfig.storageKeys.cachedRecords}_${pondId}`
       );
-      return cached || [];
+      return Array.isArray(cached) ? normalizeRecords(cached) : [];
     }
   },
 

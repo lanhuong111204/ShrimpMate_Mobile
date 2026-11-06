@@ -95,13 +95,15 @@ export default function ScreenTrayWater() {
   const pondDisplayName = selectedPond?.name || selectedPond?.code || 'Không có ao giám sát';
 
   // 6 chỉ số nước thực tế từ GET /ponds/:pondId/telemetry/latest
-  const hasTelemetry = Boolean(latestTelemetry && typeof latestTelemetry.ph === 'number');
-  const doVal = latestTelemetry?.dissolvedOxygenMgL;
-  const phVal = latestTelemetry?.ph;
-  const tempVal = latestTelemetry?.temperatureC;
-  const salVal = latestTelemetry?.salinityPpt;
-  const nh3Val = latestTelemetry?.ammoniaMgL;
-  const turbVal = latestTelemetry?.turbidityNtu;
+  const hasTelemetry = Boolean(
+    latestTelemetry && latestTelemetry.ph !== undefined && latestTelemetry.ph !== null && !isNaN(Number(latestTelemetry.ph))
+  );
+  const doVal = hasTelemetry && latestTelemetry?.dissolvedOxygenMgL !== undefined ? Number(latestTelemetry.dissolvedOxygenMgL) : undefined;
+  const phVal = hasTelemetry && latestTelemetry?.ph !== undefined ? Number(latestTelemetry.ph) : undefined;
+  const tempVal = hasTelemetry && latestTelemetry?.temperatureC !== undefined ? Number(latestTelemetry.temperatureC) : undefined;
+  const salVal = hasTelemetry && latestTelemetry?.salinityPpt !== undefined ? Number(latestTelemetry.salinityPpt) : undefined;
+  const nh3Val = hasTelemetry && latestTelemetry?.ammoniaMgL !== undefined ? Number(latestTelemetry.ammoniaMgL) : undefined;
+  const turbVal = hasTelemetry && latestTelemetry?.turbidityNtu !== undefined ? Number(latestTelemetry.turbidityNtu) : undefined;
   const measuredTimeStr = latestTelemetry?.measuredAt
     ? new Date(latestTelemetry.measuredAt).toLocaleTimeString('vi-VN', {
         hour: '2-digit',
@@ -133,7 +135,8 @@ export default function ScreenTrayWater() {
 
   // Dữ liệu Camera FIS từ GET /camera/ponds/:pondId/latest-fis
   const hasFisData = Boolean(latestFis && latestFis.hasData && latestFis.status);
-  const fisScore = latestFis?.status?.fisScore;
+  const fisScore =
+    latestFis?.status?.fisScore !== undefined ? Number(latestFis.status.fisScore) : undefined;
   const remainingFeedPct = latestFis?.status?.remainingFeedPercent;
   const shrimpDensity = latestFis?.status?.shrimpDensity;
   const ageSeconds = latestFis?.status?.ageSeconds ?? 0;

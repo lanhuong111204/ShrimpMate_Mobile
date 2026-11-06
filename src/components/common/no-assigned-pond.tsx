@@ -5,8 +5,6 @@ import {
   View,
   Pressable,
   ActivityIndicator,
-  Linking,
-  Alert,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/use-theme';
@@ -19,24 +17,6 @@ export function NoAssignedPondState() {
   const { isLoadingFarms, isLoadingPonds, refreshFarmsAndPonds } = useFarm();
 
   const isLoading = isLoadingFarms || isLoadingPonds;
-
-  const handleCallHotline = () => {
-    Alert.alert(
-      'Hotline Hỗ Trợ 24/7',
-      'Kết nối tổng đài hỗ trợ ShrimpMate (1800 6868 - Miễn phí) để kiểm tra phân công ao nuôi.',
-      [
-        { text: 'Hủy', style: 'cancel' },
-        {
-          text: 'Gọi 1800 6868',
-          onPress: () => {
-            Linking.openURL('tel:18006868').catch(() => {
-              Alert.alert('Thông Báo', 'Vui lòng gọi số 1800 6868.');
-            });
-          },
-        },
-      ]
-    );
-  };
 
   if (isLoading) {
     return (
@@ -111,16 +91,6 @@ export function NoAssignedPondState() {
           ]}>
           <MaterialIcons name="refresh" size={20} color="#FFFFFF" />
           <Text style={styles.btnRefreshText}>KIỂM TRA LẠI PHÂN CÔNG AO</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={handleCallHotline}
-          style={({ pressed }) => [
-            styles.btnSupport,
-            { opacity: pressed ? 0.85 : 1 },
-          ]}>
-          <MaterialIcons name="support-agent" size={18} color="#EA580C" />
-          <Text style={styles.btnSupportText}>GỌI HỖ TRỢ KỸ THUẬT 1800 6868</Text>
         </Pressable>
       </View>
     </View>

@@ -181,14 +181,18 @@ export default function ScreenLiveFeeder() {
     Alert.alert('Đang Phun Thử', 'Bắt đầu chu kỳ phun thử 10 giây kiểm tra góc văng cám...');
   };
 
-  const percent = targetKg > 0 ? Math.min(100, Math.round((dispensedKg / targetKg) * 100)) : 0;
-  const hopperPercent = Math.round((hopperKg / 150) * 100);
+  const safeDispensedKg = Number(dispensedKg) || 0;
+  const safeTargetKg = Number(targetKg) || 0;
+  const percent = safeTargetKg > 0 ? Math.min(100, Math.round((safeDispensedKg / safeTargetKg) * 100)) : 0;
+  const hopperPercent = Math.round(((Number(hopperKg) || 0) / 150) * 100);
 
   const currentDecision = safetyPreview?.decision || lastSafetyEvaluation?.decision || 'allowed';
   const isFeedBlocked = isEmergencyStopped || currentDecision === 'blocked';
-  const hasTelemetry = Boolean(latestTelemetry && typeof latestTelemetry.ph === 'number');
-  const doVal = latestTelemetry?.dissolvedOxygenMgL;
-  const phVal = latestTelemetry?.ph;
+  const hasTelemetry = Boolean(
+    latestTelemetry && latestTelemetry.ph !== undefined && latestTelemetry.ph !== null && !isNaN(Number(latestTelemetry.ph))
+  );
+  const doVal = hasTelemetry && latestTelemetry?.dissolvedOxygenMgL !== undefined ? Number(latestTelemetry.dissolvedOxygenMgL) : undefined;
+  const phVal = hasTelemetry && latestTelemetry?.ph !== undefined ? Number(latestTelemetry.ph) : undefined;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.surface }]}>
@@ -358,9 +362,9 @@ export default function ScreenLiveFeeder() {
                     },
                   ]}>
                   <Text style={[styles.progressKgText, { color: colors.onSurface }]}>
-                    {dispensedKg.toFixed(1)}
+                    {safeDispensedKg.toFixed(1)}
                   </Text>
-                  <Text style={styles.progressTotalText}>/ {targetKg} kg</Text>
+                  <Text style={styles.progressTotalText}>/ {safeTargetKg} kg</Text>
                   <View style={[styles.percentBadge, { backgroundColor: '#FFDBCA' }]}>
                     <Text style={styles.percentBadgeText}>{percent}% ĐÃ RẢI</Text>
                   </View>

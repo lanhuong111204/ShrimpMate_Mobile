@@ -294,10 +294,14 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
               ? 'ai_suggested'
               : 'pending',
             feedType: 'Cám số 2 hạt nổi (Grobest)',
-            targetKg: sch.feedAmountKg,
-            dispensedKg: matchingRecord ? matchingRecord.actualAmountKg : isDone ? sch.feedAmountKg : 0,
-            speedKgPerMin: sch.spreadRateKgPerMinute,
-            aiSuggestedKg: isAiSlot && aiRec ? aiRec.predictedFeedAmountKg : undefined,
+            targetKg: Number(sch.feedAmountKg) || 0,
+            dispensedKg: matchingRecord
+              ? Number(matchingRecord.actualAmountKg) || 0
+              : isDone
+              ? Number(sch.feedAmountKg) || 0
+              : 0,
+            speedKgPerMin: sch.spreadRateKgPerMinute !== undefined ? Number(sch.spreadRateKgPerMinute) || 0 : undefined,
+            aiSuggestedKg: isAiSlot && aiRec ? Number(aiRec.predictedFeedAmountKg) || 0 : undefined,
             notes: matchingRecord?.safetyReason || (sch.isEnabled ? 'Lịch tự động đang bật' : 'Tạm ngưng'),
           };
         });
@@ -308,8 +312,8 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
 
       const activeRec = records.find((r) => r.status === 'running') || records[0];
       if (activeRec) {
-        setDispensedKg(activeRec.actualAmountKg);
-        setTargetKg(activeRec.requestedAmountKg);
+        setDispensedKg(Number(activeRec.actualAmountKg) || 0);
+        setTargetKg(Number(activeRec.requestedAmountKg) || 0);
       } else {
         setDispensedKg(0);
         setTargetKg(0);

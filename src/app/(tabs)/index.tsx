@@ -82,14 +82,17 @@ export default function ScreenFeedingLog() {
   // Tìm cữ gợi ý AI hoặc cữ chiều
   const aiMeal = feedMeals.find((m) => m.status === 'ai_suggested' || m.id === 'meal-3') || feedMeals[0];
   const aiPredictedKg =
-    latestAiRecommendation?.predictedFeedAmountKg ?? aiMeal?.aiSuggestedKg ?? 0;
-  const aiBiomassKg = latestAiRecommendation?.biomassKg;
+    Number(latestAiRecommendation?.predictedFeedAmountKg ?? aiMeal?.aiSuggestedKg ?? 0) || 0;
+  const aiBiomassKg =
+    latestAiRecommendation?.biomassKg !== undefined && latestAiRecommendation?.biomassKg !== null
+      ? Number(latestAiRecommendation.biomassKg)
+      : undefined;
   const aiModelName = latestAiRecommendation?.modelName || 'ShrimpMate-AI';
   const aiExplanation = latestAiRecommendation?.explanation || '';
 
   // Summary computations
-  const totalTargetKg = feedMeals.reduce((acc, m) => acc + m.targetKg, 0);
-  const totalDispensedKg = feedMeals.reduce((acc, m) => acc + m.dispensedKg, 0);
+  const totalTargetKg = feedMeals.reduce((acc, m) => acc + (Number(m.targetKg) || 0), 0);
+  const totalDispensedKg = feedMeals.reduce((acc, m) => acc + (Number(m.dispensedKg) || 0), 0);
   const remainingKg = Math.max(0, totalTargetKg - totalDispensedKg);
   const overallPercent =
     totalTargetKg > 0 ? Math.round((totalDispensedKg / totalTargetKg) * 100) : 0;
@@ -196,13 +199,21 @@ export default function ScreenFeedingLog() {
 
   const pondDisplayName = selectedPond?.name || selectedPond?.code || farmInfo.selectedPond;
   const pondAreaDesc = selectedPond?.areaM2
-    ? `${selectedPond.areaM2.toLocaleString('vi-VN')} m² • ${
+    ? `${Number(selectedPond.areaM2).toLocaleString('vi-VN')} m² • ${
         selectedPond.status === 'maintenance' ? 'Đang bảo dưỡng' : 'Ao được phân công'
       }`
     : 'Tôm thẻ chân trắng • Ao được phân công';
 
-  const waterTemp = latestTelemetry?.temperatureC ?? farmInfo.waterTemp;
-  const doVal = latestTelemetry?.dissolvedOxygenMgL ?? farmInfo.dissolvedOxygen;
+  const rawWaterTemp = latestTelemetry?.temperatureC ?? farmInfo.waterTemp;
+  const waterTemp =
+    rawWaterTemp !== undefined && rawWaterTemp !== null && !isNaN(Number(rawWaterTemp))
+      ? Number(rawWaterTemp)
+      : undefined;
+  const rawDoVal = latestTelemetry?.dissolvedOxygenMgL ?? farmInfo.dissolvedOxygen;
+  const doVal =
+    rawDoVal !== undefined && rawDoVal !== null && !isNaN(Number(rawDoVal))
+      ? Number(rawDoVal)
+      : undefined;
   const fisLevel = latestFis?.hasData ? latestFis?.status?.appetiteLevel : undefined;
 
   return (
