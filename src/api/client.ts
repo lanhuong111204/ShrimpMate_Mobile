@@ -248,7 +248,7 @@ class ApiClient {
       }
       // Lỗi kết nối mạng vật lý (Network connection failure)
       throw {
-        message: `Không thể kết nối đến máy chủ Backend (${this.baseUrl}). Vui lòng đảm bảo backend đang hoạt động.`,
+        message: 'Không thể kết nối đến máy chủ. Vui lòng thử lại sau.',
         statusCode: 503,
       } as ApiError;
     }

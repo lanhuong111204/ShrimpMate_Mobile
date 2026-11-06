@@ -18,7 +18,7 @@ import { evaluateWaterMetricStatus } from '@/api/services/pond.service';
 import { StatusLevel } from '@/types/pond';
 import { AppetiteLevel } from '@/types/camera';
 
-function getGaugeColors(status: StatusLevel) {
+function getGaugeColors(status: StatusLevel | 'empty') {
   switch (status) {
     case 'critical':
       return {
@@ -33,6 +33,13 @@ function getGaugeColors(status: StatusLevel) {
         textColor: '#B45309',
         borderColor: '#F59E0B',
         label: 'CẦN CHÚ Ý',
+      };
+    case 'empty':
+      return {
+        bgPill: '#F1F5F9',
+        textColor: '#64748B',
+        borderColor: '#E2E8F0',
+        label: 'Chưa có dữ liệu',
       };
     default:
       return {
@@ -54,7 +61,6 @@ const FIS_LEVELS: { level: AppetiteLevel; code: string; label: string; sub: stri
 export default function ScreenTrayWater() {
   const colors = useTheme();
   const {
-    farmInfo,
     ponds,
     selectedPond,
     latestTelemetry,
@@ -68,6 +74,12 @@ export default function ScreenTrayWater() {
     refreshPondOperationalData,
     refreshFarmsAndPonds,
   } = useFarm();
+
+  const [manualFisSelected, setManualFisSelected] = React.useState<boolean>(false);
+
+  React.useEffect(() => {
+    setManualFisSelected(false);
+  }, [selectedPond?.id]);
 
   const hasAssignedPond = Boolean(selectedPond && ponds.length > 0);
   const pondDisplayName = selectedPond?.name || selectedPond?.code || 'Không có ao giám sát';
@@ -88,13 +100,19 @@ export default function ScreenTrayWater() {
       })
     : 'Chưa có dữ liệu đo';
 
-  // Đánh giá màu sắc chuẩn theo Quy tắc 3 (Xanh: optimal, Vàng: warning, Đỏ: critical)
-  const doStatus = hasTelemetry && doVal !== undefined ? evaluateWaterMetricStatus('do', doVal) : 'optimal';
-  const phStatus = hasTelemetry && phVal !== undefined ? evaluateWaterMetricStatus('ph', phVal) : 'optimal';
-  const tempStatus = hasTelemetry && tempVal !== undefined ? evaluateWaterMetricStatus('temperature', tempVal) : 'optimal';
-  const salStatus = hasTelemetry && salVal !== undefined ? evaluateWaterMetricStatus('salinity', salVal) : 'optimal';
-  const nh3Status = hasTelemetry && nh3Val !== undefined ? evaluateWaterMetricStatus('nh3', nh3Val) : 'optimal';
-  const turbStatus = hasTelemetry && turbVal !== undefined ? evaluateWaterMetricStatus('turbidity', turbVal) : 'optimal';
+  // Đánh giá màu sắc chuẩn theo Quy tắc 3 (Xanh: optimal, Vàng: warning, Đỏ: critical, Xám: empty)
+  const doStatus: StatusLevel | 'empty' =
+    hasTelemetry && doVal !== undefined ? evaluateWaterMetricStatus('do', doVal) : 'empty';
+  const phStatus: StatusLevel | 'empty' =
+    hasTelemetry && phVal !== undefined ? evaluateWaterMetricStatus('ph', phVal) : 'empty';
+  const tempStatus: StatusLevel | 'empty' =
+    hasTelemetry && tempVal !== undefined ? evaluateWaterMetricStatus('temperature', tempVal) : 'empty';
+  const salStatus: StatusLevel | 'empty' =
+    hasTelemetry && salVal !== undefined ? evaluateWaterMetricStatus('salinity', salVal) : 'empty';
+  const nh3Status: StatusLevel | 'empty' =
+    hasTelemetry && nh3Val !== undefined ? evaluateWaterMetricStatus('nh3', nh3Val) : 'empty';
+  const turbStatus: StatusLevel | 'empty' =
+    hasTelemetry && turbVal !== undefined ? evaluateWaterMetricStatus('turbidity', turbVal) : 'empty';
 
   const hasCriticalWater =
     hasTelemetry && (doStatus === 'critical' || phStatus === 'critical' || nh3Status === 'critical');
@@ -175,7 +193,9 @@ export default function ScreenTrayWater() {
                 style={[
                   styles.pingDotGroup,
                   {
-                    backgroundColor: hasCriticalWater
+                    backgroundColor: !hasTelemetry
+                      ? '#94A3B8'
+                      : hasCriticalWater
                       ? '#BA1A1A'
                       : hasWarningWater
                       ? '#F59E0B'
@@ -184,14 +204,16 @@ export default function ScreenTrayWater() {
                 ]}
               />
               <Text style={[styles.statusText, { color: colors.onSurfaceVariant }]}>
-                {pondDisplayName} • Đo lúc {measuredTimeStr}
+                {pondDisplayName} • {hasTelemetry ? `Đo lúc ${measuredTimeStr}` : 'Chưa có dữ liệu đo'}
               </Text>
             </View>
             <View
               style={[
                 styles.bioBadge,
                 {
-                  backgroundColor: hasCriticalWater
+                  backgroundColor: !hasTelemetry
+                    ? '#F1F5F9'
+                    : hasCriticalWater
                     ? '#FFDAD6'
                     : hasWarningWater
                     ? '#FEF3C7'
@@ -199,10 +221,20 @@ export default function ScreenTrayWater() {
                 },
               ]}>
               <MaterialIcons
-                name={hasCriticalWater ? 'error' : hasWarningWater ? 'warning' : 'verified'}
+                name={
+                  !hasTelemetry
+                    ? 'sensors-off'
+                    : hasCriticalWater
+                    ? 'error'
+                    : hasWarningWater
+                    ? 'warning'
+                    : 'verified'
+                }
                 size={14}
                 color={
-                  hasCriticalWater
+                  !hasTelemetry
+                    ? '#64748B'
+                    : hasCriticalWater
                     ? '#BA1A1A'
                     : hasWarningWater
                     ? '#B45309'
@@ -213,14 +245,18 @@ export default function ScreenTrayWater() {
                 style={[
                   styles.bioBadgeText,
                   {
-                    color: hasCriticalWater
+                    color: !hasTelemetry
+                      ? '#64748B'
+                      : hasCriticalWater
                       ? '#BA1A1A'
                       : hasWarningWater
                       ? '#B45309'
                       : colors.onSecondaryContainer,
                   },
                 ]}>
-                {hasCriticalWater
+                {!hasTelemetry
+                  ? 'Chưa có dữ liệu'
+                  : hasCriticalWater
                   ? 'Nguy cấp nước'
                   : hasWarningWater
                   ? 'Cần chú ý'
@@ -250,77 +286,91 @@ export default function ScreenTrayWater() {
 
             {/* Viewport Image with AI Overlays */}
             <View style={styles.cameraViewport}>
-              <Image
-                source={{
-                  uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDZ5YhCPxPklKToJ8k-wu5XIXNzq3YF7WcI0NUdVhyhmXEaEIm5WD86Qe2e5hMoZkVTI126NEAMzsfFDAz5lTGDRRnj3tqPSuiMLxpg9yEpeBXns6aKoTnEzsTYbPYylJW0VV-73SyheKRqDihZjZwfeU7PLav6P-5bzh9baBXA1OOhJbXSThUN6NtR_3dHYiU1_2xoAXsKzQYOWl4_zUc0OSTawSHR5Ata6bCYlNGUDTtp8W42WWWfxQ',
-                }}
-                style={styles.trayImg}
-                contentFit="cover"
-              />
+              {hasFisData ? (
+                <>
+                  <Image
+                    source={{
+                      uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDZ5YhCPxPklKToJ8k-wu5XIXNzq3YF7WcI0NUdVhyhmXEaEIm5WD86Qe2e5hMoZkVTI126NEAMzsfFDAz5lTGDRRnj3tqPSuiMLxpg9yEpeBXns6aKoTnEzsTYbPYylJW0VV-73SyheKRqDihZjZwfeU7PLav6P-5bzh9baBXA1OOhJbXSThUN6NtR_3dHYiU1_2xoAXsKzQYOWl4_zUc0OSTawSHR5Ata6bCYlNGUDTtp8W42WWWfxQ',
+                    }}
+                    style={styles.trayImg}
+                    contentFit="cover"
+                  />
 
-              {/* Floating Top AI Tag */}
-              <View style={styles.floatingAiTag}>
-                <MaterialIcons name="auto-awesome" size={16} color="#7FFC97" />
-                <Text style={styles.floatingAiTagText}>
-                  {hasFisData && fisScore !== undefined ? (
-                    <>
-                      YOLO11n + MobileNetV3 • FIS:{' '}
-                      <Text style={{ fontWeight: '900', color: '#7FFC97' }}>
-                        {fisScore.toFixed(2)}
-                      </Text>{' '}
-                      • Cám dư: <Text style={{ fontWeight: '900' }}>{remainingFeedPct}%</Text>
-                    </>
-                  ) : (
-                    'Chưa có dữ liệu phân tích sàng ăn'
-                  )}
-                </Text>
-              </View>
+                  {/* Floating Top AI Tag */}
+                  <View style={styles.floatingAiTag}>
+                    <MaterialIcons name="auto-awesome" size={16} color="#7FFC97" />
+                    <Text style={styles.floatingAiTagText}>
+                      {fisScore !== undefined ? (
+                        <>
+                          YOLO11n + MobileNetV3 • FIS:{' '}
+                          <Text style={{ fontWeight: '900', color: '#7FFC97' }}>
+                            {fisScore.toFixed(2)}
+                          </Text>{' '}
+                          • Cám dư: <Text style={{ fontWeight: '900' }}>{remainingFeedPct}%</Text>
+                        </>
+                      ) : (
+                        'Đang phân tích sàng ăn'
+                      )}
+                    </Text>
+                  </View>
 
-              {/* Floating Freshness Pill */}
-              <View
-                style={[
-                  styles.freshnessPill,
-                  {
-                    backgroundColor: !hasFisData
-                      ? 'rgba(100, 116, 139, 0.9)'
-                      : isCameraStale
-                      ? 'rgba(245, 158, 11, 0.95)'
-                      : 'rgba(0, 110, 45, 0.9)',
-                  },
-                ]}>
-                <MaterialIcons
-                  name={!hasFisData ? 'videocam-off' : isCameraStale ? 'signal-wifi-statusbar-connected-no-internet-4' : 'videocam'}
-                  size={13}
-                  color="#FFFFFF"
-                />
-                <Text style={styles.freshnessPillText}>
-                  {!hasFisData
-                    ? 'Chưa có tín hiệu'
-                    : isCameraStale
-                    ? 'Mất tín hiệu Camera (> 120s)'
-                    : `Live • ${ageSeconds}s trước`}
-                </Text>
-              </View>
+                  {/* Floating Freshness Pill */}
+                  <View
+                    style={[
+                      styles.freshnessPill,
+                      {
+                        backgroundColor: isCameraStale
+                          ? 'rgba(245, 158, 11, 0.95)'
+                          : 'rgba(0, 110, 45, 0.9)',
+                      },
+                    ]}>
+                    <MaterialIcons
+                      name={
+                        isCameraStale
+                          ? 'signal-wifi-statusbar-connected-no-internet-4'
+                          : 'videocam'
+                      }
+                      size={13}
+                      color="#FFFFFF"
+                    />
+                    <Text style={styles.freshnessPillText}>
+                      {isCameraStale
+                        ? 'Mất tín hiệu Camera (> 120s)'
+                        : `Live • ${ageSeconds}s trước`}
+                    </Text>
+                  </View>
 
-              {/* Floating Bottom Activity Tag */}
-              <View style={styles.floatingBottomTag}>
-                <View style={styles.activityIcon}>
-                  <MaterialIcons name="psychology" size={16} color="#FFFFFF" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.activityTitle}>
-                    Cường độ bắt mồi:{' '}
-                    {latestFis?.status?.appetiteLevelDescription ||
-                      (hasFisData ? `Mức ${fisAppetiteLevel} (${FIS_LEVELS[fisAppetiteLevel]?.label})` : 'Chưa có dữ liệu')}
+                  {/* Floating Bottom Activity Tag */}
+                  <View style={styles.floatingBottomTag}>
+                    <View style={styles.activityIcon}>
+                      <MaterialIcons name="psychology" size={16} color="#FFFFFF" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.activityTitle}>
+                        Cường độ bắt mồi:{' '}
+                        {latestFis?.status?.appetiteLevelDescription ||
+                          `Mức ${fisAppetiteLevel} (${FIS_LEVELS[fisAppetiteLevel]?.label})`}
+                      </Text>
+                      <Text style={styles.activitySub}>
+                        {selectedPond?.code ? `${selectedPond.code} • ` : ''}
+                        Mật độ: {shrimpDensity ?? 0} con • Độ sạch nhá: {trayCleanPercent}%
+                      </Text>
+                    </View>
+                  </View>
+                </>
+              ) : (
+                <View style={styles.emptyCameraContainer}>
+                  <View style={styles.emptyCameraIconCircle}>
+                    <MaterialIcons name="videocam-off" size={32} color="#94A3B8" />
+                  </View>
+                  <Text style={styles.emptyCameraTitle}>
+                    Chưa có dữ liệu hình ảnh sàng ăn
                   </Text>
-                  <Text style={styles.activitySub}>
-                    {selectedPond?.code ? `${selectedPond.code} • ` : ''}
-                    {hasFisData
-                      ? `Mật độ: ${shrimpDensity ?? 0} con • Độ sạch nhá: ${trayCleanPercent}%`
-                      : 'Chưa có dữ liệu hình ảnh'}
+                  <Text style={styles.emptyCameraSub}>
+                    {selectedPond?.name || selectedPond?.code || 'Ao nuôi'} • Nhấn nút bên dưới để chụp & phân tích nhá ăn
                   </Text>
                 </View>
-              </View>
+              )}
             </View>
 
             {/* Scan Action Button */}
@@ -363,7 +413,8 @@ export default function ScreenTrayWater() {
             </View>
             <View style={styles.appetiteButtons}>
               {FIS_LEVELS.map((item) => {
-                const isSelected = fisAppetiteLevel === item.level;
+                const isSelected =
+                  (hasFisData || manualFisSelected) && fisAppetiteLevel === item.level;
                 const activeBg =
                   item.level === 0
                     ? '#FFDAD6'
@@ -392,7 +443,10 @@ export default function ScreenTrayWater() {
                 return (
                   <Pressable
                     key={item.level}
-                    onPress={() => setFisAppetiteLevel(item.level)}
+                    onPress={() => {
+                      setManualFisSelected(true);
+                      setFisAppetiteLevel(item.level);
+                    }}
                     style={[
                       styles.appetiteBtn,
                       isSelected && {
@@ -441,8 +495,10 @@ export default function ScreenTrayWater() {
                 {
                   backgroundColor: colors.surfaceContainerLowest,
                   borderColor:
-                    doStatus !== 'optimal' ? doTheme.borderColor : colors.outlineVariant + '40',
-                  borderWidth: doStatus !== 'optimal' ? 1.5 : 1,
+                    doStatus !== 'optimal' && doStatus !== 'empty'
+                      ? doTheme.borderColor
+                      : colors.outlineVariant + '40',
+                  borderWidth: doStatus !== 'optimal' && doStatus !== 'empty' ? 1.5 : 1,
                 },
               ]}>
               <View style={styles.metricCardTop}>
@@ -468,15 +524,17 @@ export default function ScreenTrayWater() {
                 {
                   backgroundColor: colors.surfaceContainerLowest,
                   borderColor:
-                    phStatus !== 'optimal' ? phTheme.borderColor : colors.outlineVariant + '40',
-                  borderWidth: phStatus !== 'optimal' ? 1.5 : 1,
+                    phStatus !== 'optimal' && phStatus !== 'empty'
+                      ? phTheme.borderColor
+                      : colors.outlineVariant + '40',
+                  borderWidth: phStatus !== 'optimal' && phStatus !== 'empty' ? 1.5 : 1,
                 },
               ]}>
               <View style={styles.metricCardTop}>
                 <MaterialIcons name="colorize" size={18} color={phTheme.textColor} />
                 <View style={[styles.metricPill, { backgroundColor: phTheme.bgPill }]}>
                   <Text style={[styles.metricPillText, { color: phTheme.textColor }]}>
-                    {hasTelemetry ? phTheme.label : 'Chưa có dữ liệu'}
+                    {phTheme.label}
                   </Text>
                 </View>
               </View>
@@ -495,15 +553,17 @@ export default function ScreenTrayWater() {
                 {
                   backgroundColor: colors.surfaceContainerLowest,
                   borderColor:
-                    tempStatus !== 'optimal' ? tempTheme.borderColor : colors.outlineVariant + '40',
-                  borderWidth: tempStatus !== 'optimal' ? 1.5 : 1,
+                    tempStatus !== 'optimal' && tempStatus !== 'empty'
+                      ? tempTheme.borderColor
+                      : colors.outlineVariant + '40',
+                  borderWidth: tempStatus !== 'optimal' && tempStatus !== 'empty' ? 1.5 : 1,
                 },
               ]}>
               <View style={styles.metricCardTop}>
                 <MaterialIcons name="thermostat" size={18} color={tempTheme.textColor} />
                 <View style={[styles.metricPill, { backgroundColor: tempTheme.bgPill }]}>
                   <Text style={[styles.metricPillText, { color: tempTheme.textColor }]}>
-                    {hasTelemetry ? tempTheme.label : 'Chưa có dữ liệu'}
+                    {tempTheme.label}
                   </Text>
                 </View>
               </View>
@@ -522,15 +582,17 @@ export default function ScreenTrayWater() {
                 {
                   backgroundColor: colors.surfaceContainerLowest,
                   borderColor:
-                    salStatus !== 'optimal' ? salTheme.borderColor : colors.outlineVariant + '40',
-                  borderWidth: salStatus !== 'optimal' ? 1.5 : 1,
+                    salStatus !== 'optimal' && salStatus !== 'empty'
+                      ? salTheme.borderColor
+                      : colors.outlineVariant + '40',
+                  borderWidth: salStatus !== 'optimal' && salStatus !== 'empty' ? 1.5 : 1,
                 },
               ]}>
               <View style={styles.metricCardTop}>
                 <MaterialIcons name="opacity" size={18} color={salTheme.textColor} />
                 <View style={[styles.metricPill, { backgroundColor: salTheme.bgPill }]}>
                   <Text style={[styles.metricPillText, { color: salTheme.textColor }]}>
-                    {hasTelemetry ? salTheme.label : 'Chưa có dữ liệu'}
+                    {salTheme.label}
                   </Text>
                 </View>
               </View>
@@ -549,15 +611,17 @@ export default function ScreenTrayWater() {
                 {
                   backgroundColor: colors.surfaceContainerLowest,
                   borderColor:
-                    nh3Status !== 'optimal' ? nh3Theme.borderColor : colors.outlineVariant + '40',
-                  borderWidth: nh3Status !== 'optimal' ? 1.5 : 1,
+                    nh3Status !== 'optimal' && nh3Status !== 'empty'
+                      ? nh3Theme.borderColor
+                      : colors.outlineVariant + '40',
+                  borderWidth: nh3Status !== 'optimal' && nh3Status !== 'empty' ? 1.5 : 1,
                 },
               ]}>
               <View style={styles.metricCardTop}>
                 <MaterialIcons name="science" size={18} color={nh3Theme.textColor} />
                 <View style={[styles.metricPill, { backgroundColor: nh3Theme.bgPill }]}>
                   <Text style={[styles.metricPillText, { color: nh3Theme.textColor }]}>
-                    {hasTelemetry ? nh3Theme.label : 'Chưa có dữ liệu'}
+                    {nh3Theme.label}
                   </Text>
                 </View>
               </View>
@@ -576,15 +640,17 @@ export default function ScreenTrayWater() {
                 {
                   backgroundColor: colors.surfaceContainerLowest,
                   borderColor:
-                    turbStatus !== 'optimal' ? turbTheme.borderColor : colors.outlineVariant + '40',
-                  borderWidth: turbStatus !== 'optimal' ? 1.5 : 1,
+                    turbStatus !== 'optimal' && turbStatus !== 'empty'
+                      ? turbTheme.borderColor
+                      : colors.outlineVariant + '40',
+                  borderWidth: turbStatus !== 'optimal' && turbStatus !== 'empty' ? 1.5 : 1,
                 },
               ]}>
               <View style={styles.metricCardTop}>
                 <MaterialIcons name="blur-on" size={18} color={turbTheme.textColor} />
                 <View style={[styles.metricPill, { backgroundColor: turbTheme.bgPill }]}>
                   <Text style={[styles.metricPillText, { color: turbTheme.textColor }]}>
-                    {hasTelemetry ? turbTheme.label : 'Chưa có dữ liệu'}
+                    {turbTheme.label}
                   </Text>
                 </View>
               </View>
@@ -631,16 +697,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     flex: 1,
+    marginRight: 8,
   },
   pingDotGroup: {
     width: 10,
     height: 10,
     borderRadius: 5,
     backgroundColor: '#006E2D',
+    flexShrink: 0,
   },
   statusText: {
     fontSize: 12,
     fontWeight: '700',
+    flex: 1,
   },
   bioBadge: {
     flexDirection: 'row',
@@ -649,6 +718,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 999,
+    flexShrink: 0,
   },
   bioBadgeText: {
     fontSize: 11,
@@ -684,7 +754,35 @@ const styles = StyleSheet.create({
     position: 'relative',
     width: '100%',
     height: 215,
-    backgroundColor: '#213145',
+    backgroundColor: '#1E293B',
+  },
+  emptyCameraContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    gap: 8,
+  },
+  emptyCameraIconCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(148, 163, 184, 0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  emptyCameraTitle: {
+    color: '#F8FAFC',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  emptyCameraSub: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   trayImg: {
     width: '100%',

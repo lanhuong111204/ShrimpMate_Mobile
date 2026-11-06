@@ -72,12 +72,10 @@ export default function ScreenFeedingLog() {
   // Tìm cữ gợi ý AI hoặc cữ chiều
   const aiMeal = feedMeals.find((m) => m.status === 'ai_suggested' || m.id === 'meal-3') || feedMeals[0];
   const aiPredictedKg =
-    latestAiRecommendation?.predictedFeedAmountKg ?? aiMeal?.aiSuggestedKg ?? 22.0;
-  const aiBiomassKg = latestAiRecommendation?.biomassKg ?? 780.0;
-  const aiModelName = latestAiRecommendation?.modelName || 'ShrimpMate-FeedOpt-v2';
-  const aiExplanation =
-    latestAiRecommendation?.explanation ||
-    'Tôm bắt mồi mạnh (FIS cao), DO và nhiệt độ nằm trong ngưỡng tối ưu.';
+    latestAiRecommendation?.predictedFeedAmountKg ?? aiMeal?.aiSuggestedKg ?? 0;
+  const aiBiomassKg = latestAiRecommendation?.biomassKg;
+  const aiModelName = latestAiRecommendation?.modelName || 'ShrimpMate-AI';
+  const aiExplanation = latestAiRecommendation?.explanation || '';
 
   // Summary computations
   const totalTargetKg = feedMeals.reduce((acc, m) => acc + m.targetKg, 0);
@@ -191,7 +189,7 @@ export default function ScreenFeedingLog() {
 
   const waterTemp = latestTelemetry?.temperatureC ?? farmInfo.waterTemp;
   const doVal = latestTelemetry?.dissolvedOxygenMgL ?? farmInfo.dissolvedOxygen;
-  const fisLevel = latestFis?.status?.appetiteLevel ?? 3;
+  const fisLevel = latestFis?.hasData ? latestFis?.status?.appetiteLevel : undefined;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.surface }]}>
@@ -241,10 +239,14 @@ export default function ScreenFeedingLog() {
             </View>
 
             <View style={styles.weatherBox}>
-              <Text style={styles.weatherLabel}>DO: {doVal} mg/L</Text>
+              <Text style={styles.weatherLabel}>
+                DO: {doVal !== undefined ? doVal.toFixed(1) : '--'} mg/L
+              </Text>
               <View style={styles.tempRow}>
                 <MaterialIcons name="wb-sunny" size={16} color="#F97316" />
-                <Text style={styles.tempVal}>{waterTemp}°C</Text>
+                <Text style={styles.tempVal}>
+                  {waterTemp !== undefined ? waterTemp.toFixed(1) : '--'}°C
+                </Text>
               </View>
             </View>
           </Pressable>
@@ -268,7 +270,7 @@ export default function ScreenFeedingLog() {
               <View style={[styles.badgePill, { backgroundColor: colors.secondaryContainer }]}>
                 <View style={[styles.dot, { backgroundColor: colors.secondary }]} />
                 <Text style={[styles.badgeText, { color: colors.onSecondaryContainer }]}>
-                  {feedMeals.length} Cữ • FIS Mức {fisLevel}
+                  {feedMeals.length} Cữ • {fisLevel !== undefined ? `FIS Mức ${fisLevel}` : 'FIS: --'}
                 </Text>
               </View>
             </View>
@@ -304,7 +306,9 @@ export default function ScreenFeedingLog() {
               <View style={styles.progressLabels}>
                 <Text style={styles.progressPercentText}>{overallPercent}% khẩu phần</Text>
                 <Text style={styles.progressSubText}>
-                  Sinh khối ước tính: {aiBiomassKg} kg
+                  {aiBiomassKg !== undefined
+                    ? `Sinh khối ước tính: ${aiBiomassKg} kg`
+                    : 'Sinh khối: Chưa có dữ liệu'}
                 </Text>
               </View>
               <View
@@ -417,14 +421,14 @@ export default function ScreenFeedingLog() {
 
           {/* Meal Timeline List */}
           <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: colors.onSurface }]}>
+            <Text style={[styles.sectionTitle, { color: colors.onSurface, flex: 1, marginRight: 8 }]}>
               LỊCH CHO ĂN & NHẬT KÝ CỮ ĂN
             </Text>
             <Pressable
               onPress={handleOpenQuickFeedModal}
-              style={[styles.addMealBtn, { backgroundColor: '#FFDBCA' }]}>
+              style={[styles.addMealBtn, { backgroundColor: '#FFDBCA', flexShrink: 0 }]}>
               <MaterialIcons name="bolt" size={16} color="#9D4300" />
-              <Text style={styles.addMealText}>Cho Ăn Nhanh (Quick Feed)</Text>
+              <Text style={styles.addMealText}>Cho Ăn Nhanh</Text>
             </Pressable>
           </View>
 

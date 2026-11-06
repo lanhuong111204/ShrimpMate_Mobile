@@ -201,12 +201,16 @@ export default function ScreenLiveFeeder() {
                   ? '#FFDAD6'
                   : currentDecision === 'adjusted'
                   ? '#FEF3C7'
-                  : '#E8F5E9',
+                  : hasTelemetry || lastSafetyEvaluation
+                  ? '#E8F5E9'
+                  : '#F1F5F9',
                 borderColor: isEmergencyStopped || currentDecision === 'blocked'
                   ? '#BA1A1A'
                   : currentDecision === 'adjusted'
                   ? '#F59E0B'
-                  : '#7CF994',
+                  : hasTelemetry || lastSafetyEvaluation
+                  ? '#7CF994'
+                  : '#CBD5E1',
               },
             ]}>
             <View style={styles.safetyHeader}>
@@ -216,7 +220,9 @@ export default function ScreenLiveFeeder() {
                     ? 'dangerous'
                     : currentDecision === 'adjusted'
                     ? 'warning-amber'
-                    : 'verified-user'
+                    : hasTelemetry || lastSafetyEvaluation
+                    ? 'verified-user'
+                    : 'sensors-off'
                 }
                 size={22}
                 color={
@@ -224,7 +230,9 @@ export default function ScreenLiveFeeder() {
                     ? '#BA1A1A'
                     : currentDecision === 'adjusted'
                     ? '#B45309'
-                    : '#006E2D'
+                    : hasTelemetry || lastSafetyEvaluation
+                    ? '#006E2D'
+                    : '#64748B'
                 }
               />
               <Text
@@ -236,7 +244,9 @@ export default function ScreenLiveFeeder() {
                         ? '#93000A'
                         : currentDecision === 'adjusted'
                         ? '#92400E'
-                        : '#006E2D',
+                        : hasTelemetry || lastSafetyEvaluation
+                        ? '#006E2D'
+                        : '#475569',
                   },
                 ]}>
                 {isEmergencyStopped
@@ -245,7 +255,9 @@ export default function ScreenLiveFeeder() {
                   ? 'SAFETY RULE ENGINE: KHÓA XẢ CÁM (BLOCKED)'
                   : currentDecision === 'adjusted'
                   ? 'SAFETY RULE ENGINE: ĐIỀU CHỈNH AN TOÀN (ADJUSTED)'
-                  : `SAFETY RULE ENGINE: AN TOÀN (${selectedPond?.code || 'AO-01'})`}
+                  : hasTelemetry || lastSafetyEvaluation
+                  ? `SAFETY RULE ENGINE: AN TOÀN (${selectedPond?.code || selectedPond?.name || 'Ao nuôi'})`
+                  : `SAFETY RULE ENGINE: CHƯA CÓ DỮ LIỆU ĐO (${selectedPond?.code || selectedPond?.name || 'Ao nuôi'})`}
               </Text>
             </View>
             <Text
@@ -257,7 +269,9 @@ export default function ScreenLiveFeeder() {
                       ? '#93000A'
                       : currentDecision === 'adjusted'
                       ? '#92400E'
-                      : '#005320',
+                      : hasTelemetry || lastSafetyEvaluation
+                      ? '#005320'
+                      : '#64748B',
                 },
               ]}>
               {isEmergencyStopped

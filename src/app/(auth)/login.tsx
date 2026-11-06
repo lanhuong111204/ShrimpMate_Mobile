@@ -279,22 +279,12 @@ export default function ScreenLogin() {
               <View style={[styles.logoBox, { backgroundColor: '#EA580C' }]}>
                 <MaterialIcons name="waves" size={26} color="#FFFFFF" />
               </View>
-              <View>
+              <View style={{ flex: 1 }}>
                 <Text style={[styles.brandName, { color: colors.onSurface }]}>ShrimpMate</Text>
                 <Text style={[styles.brandSub, { color: '#F97316' }]}>
                   Hệ Sinh Thái Nuôi Tôm Thông Minh
                 </Text>
               </View>
-            </View>
-
-            <View
-              style={[
-                styles.signalBadge,
-                { backgroundColor: colors.surfaceContainerLowest, borderColor: colors.secondaryContainer },
-              ]}>
-              <View style={[styles.signalDot, { backgroundColor: colors.secondary }]} />
-              <MaterialIcons name="wifi" size={14} color={colors.secondary} />
-              <Text style={[styles.signalText, { color: colors.onSurface }]}>Máy Chủ Online</Text>
             </View>
           </View>
 
