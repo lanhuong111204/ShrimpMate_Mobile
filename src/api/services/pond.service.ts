@@ -289,7 +289,15 @@ export const pondService = {
     } catch {
       // Đánh giá an toàn cục bộ theo đúng ngưỡng sinh học khi có dữ liệu đo mới nhất trong cache
       if (!fallbackTelemetry || typeof fallbackTelemetry.dissolvedOxygenMgL !== 'number') {
-        throw new Error('Không thể đánh giá an toàn sinh học do mất kết nối máy chủ và chưa có dữ liệu đo mới nhất');
+        return {
+          decision: 'blocked',
+          allowedAmountKg: 0,
+          requestedAmountKg: payload.requestedAmountKg,
+          reasons: [
+            'Chưa có dữ liệu cảm biến môi trường nước cho ao này để đánh giá an toàn sinh học.',
+          ],
+          appliedRules: ['NO_TELEMETRY_DATA'],
+        };
       }
       const doVal = fallbackTelemetry.dissolvedOxygenMgL;
       const phVal = fallbackTelemetry.ph;

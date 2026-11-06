@@ -126,6 +126,8 @@ export default function ScreenFeedingLog() {
     try {
       const ev = await evaluateSafetyBeforeFeed(parsed);
       setSafetyPreview(ev);
+    } catch {
+      setSafetyPreview(null);
     } finally {
       setIsEvaluating(false);
     }
@@ -139,6 +141,8 @@ export default function ScreenFeedingLog() {
       try {
         const ev = await evaluateSafetyBeforeFeed(parsed);
         setSafetyPreview(ev);
+      } catch {
+        setSafetyPreview(null);
       } finally {
         setIsEvaluating(false);
       }

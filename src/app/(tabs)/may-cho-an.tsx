@@ -101,6 +101,8 @@ export default function ScreenLiveFeeder() {
     try {
       const res = await evaluateSafetyBeforeFeed(numKg);
       setSafetyPreview(res);
+    } catch {
+      setSafetyPreview(null);
     } finally {
       setIsEvaluatingSafety(false);
     }
@@ -114,6 +116,8 @@ export default function ScreenLiveFeeder() {
       try {
         const res = await evaluateSafetyBeforeFeed(numKg);
         setSafetyPreview(res);
+      } catch {
+        setSafetyPreview(null);
       } finally {
         setIsEvaluatingSafety(false);
       }

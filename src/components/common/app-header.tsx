@@ -77,12 +77,13 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
     router.replace('/(auth)/login');
   };
 
-  // Tên hiển thị trên nút Pill ao nuôi (đảm bảo đồng bộ 100% với danh sách trong Modal)
+  // Tên hiển thị ngắn gọn trên nút Pill ao nuôi (tránh bị cắt dấu ...)
   const hasAssignedPond = Boolean(selectedPond || ponds.length > 0);
-  const displayPondName =
+  const rawPondName =
     selectedPond?.name ||
     selectedPond?.code ||
     (ponds.length > 0 ? ponds[0].name || ponds[0].code : 'Không có ao');
+  const displayPondName = rawPondName.split(/\s*[-–]\s*/)[0].trim() || rawPondName;
 
   return (
     <View
@@ -102,7 +103,7 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
           <View style={{ flex: 1 }}>
             <Text numberOfLines={1} style={styles.brandTitle}>ShrimpMate</Text>
             <Text numberOfLines={1} style={styles.brandSubtitle}>
-              {selectedFarm?.name ? `${selectedFarm.name} • ${subtitle}` : subtitle}
+              {selectedFarm?.name || subtitle}
             </Text>
           </View>
         </View>
