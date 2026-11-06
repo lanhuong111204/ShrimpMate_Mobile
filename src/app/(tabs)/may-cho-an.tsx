@@ -172,8 +172,9 @@ export default function ScreenLiveFeeder() {
 
   const currentDecision = safetyPreview?.decision || lastSafetyEvaluation?.decision || 'allowed';
   const isFeedBlocked = isEmergencyStopped || currentDecision === 'blocked';
-  const doVal = latestTelemetry?.dissolvedOxygenMgL ?? farmInfo.dissolvedOxygen;
-  const phVal = latestTelemetry?.ph ?? farmInfo.ph;
+  const hasTelemetry = Boolean(latestTelemetry && typeof latestTelemetry.ph === 'number');
+  const doVal = latestTelemetry?.dissolvedOxygenMgL;
+  const phVal = latestTelemetry?.ph;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.surface }]}>
@@ -260,9 +261,11 @@ export default function ScreenLiveFeeder() {
                 },
               ]}>
               {isEmergencyStopped
-                ? `Đã ngắt động cơ máy cho ăn (${feederDevice?.deviceUid || 'ESP32_FEEDER_01'}) qua MQTT.`
+                ? `Đã ngắt động cơ máy cho ăn (${feederDevice?.deviceUid || 'Thiết bị máy ăn'}) qua MQTT.`
                 : lastSafetyEvaluation?.reasons?.[0] ||
-                  `✓ ${selectedPond?.name || farmInfo.selectedPond}: DO = ${doVal} mg/L, pH = ${phVal} • Đạt chuẩn xả cám an toàn.`}
+                  (hasTelemetry && doVal !== undefined && phVal !== undefined
+                    ? `✓ ${selectedPond?.name || 'Ao nuôi'}: DO = ${doVal} mg/L, pH = ${phVal} • Đạt chuẩn xả cám an toàn.`
+                    : `Chưa có dữ liệu đo từ cảm biến`)}
             </Text>
           </View>
 
@@ -298,7 +301,7 @@ export default function ScreenLiveFeeder() {
                 </Text>
               </View>
               <Text style={styles.gaugeSub}>
-                {feederDevice?.deviceUid || 'ESP32_FEEDER_01'} • MQTT
+                {feederDevice?.deviceUid || 'Chưa gắn thiết bị'} • MQTT
               </Text>
             </View>
 

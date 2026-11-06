@@ -117,7 +117,7 @@ export default function ScreenFeedingLog() {
     }
     Alert.alert(
       'Giữ Nguyên Khẩu Phần',
-      `Đã lưu khẩu phần ${aiMeal?.targetKg ?? 25} kg theo quyết định của kỹ thuật viên.`
+      `Đã lưu khẩu phần ${aiMeal?.targetKg ?? 25} kg theo quyết định của người nuôi.`
     );
   };
 
@@ -326,76 +326,94 @@ export default function ScreenFeedingLog() {
           </View>
 
           {/* AI Recommendation Summary Card (UC014 - GET /ponds/:pondId/ai/recommendations/latest) */}
-          <View
-            style={[
-              styles.aiCard,
-              {
-                backgroundColor:
-                  aiMeal?.isAiAccepted === true
-                    ? '#E8F5E9'
-                    : aiMeal?.isAiAccepted === false
-                    ? '#FFF3E0'
-                    : '#FFF8F5',
-                borderColor: aiMeal?.isAiAccepted === true ? '#7CF994' : '#F97316',
-              },
-            ]}>
-            <View style={styles.aiHeader}>
-              <View style={styles.aiBadgeGroup}>
-                <MaterialIcons name="auto-awesome" size={20} color="#F97316" />
-                <Text style={styles.aiBadgeTitle}>
-                  KHUYẾN NGHỊ AI ({aiModelName.toUpperCase()})
-                </Text>
+          {latestAiRecommendation ? (
+            <View
+              style={[
+                styles.aiCard,
+                {
+                  backgroundColor:
+                    aiMeal?.isAiAccepted === true
+                      ? '#E8F5E9'
+                      : aiMeal?.isAiAccepted === false
+                      ? '#FFF3E0'
+                      : '#FFF8F5',
+                  borderColor: aiMeal?.isAiAccepted === true ? '#7CF994' : '#F97316',
+                },
+              ]}>
+              <View style={styles.aiHeader}>
+                <View style={styles.aiBadgeGroup}>
+                  <MaterialIcons name="auto-awesome" size={20} color="#F97316" />
+                  <Text style={styles.aiBadgeTitle}>
+                    KHUYẾN NGHỊ AI ({aiModelName.toUpperCase()})
+                  </Text>
+                </View>
+                <View style={styles.aiStatusBadge}>
+                  <Text style={styles.aiStatusText}>
+                    {aiMeal?.isAiAccepted === true
+                      ? '✓ ĐÃ ÁP DỤNG'
+                      : aiMeal?.isAiAccepted === false
+                      ? 'GIỮ ĐỊNH MỨC'
+                      : `TIN CẬY ${Math.round((latestAiRecommendation?.confidence ?? 0.94) * 100)}%`}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.aiStatusBadge}>
-                <Text style={styles.aiStatusText}>
-                  {aiMeal?.isAiAccepted === true
-                    ? '✓ ĐÃ ÁP DỤNG'
-                    : aiMeal?.isAiAccepted === false
-                    ? 'GIỮ ĐỊNH MỨC'
-                    : `TIN CẬY ${Math.round((latestAiRecommendation?.confidence ?? 0.94) * 100)}%`}
-                </Text>
-              </View>
-            </View>
 
-            <Text style={styles.aiBodyText}>
-              Khuyến nghị cữ hiện tại:{' '}
-              <Text style={{ fontWeight: '900', color: '#006E2D' }}>
-                {aiPredictedKg.toFixed(1)} kg
-              </Text>{' '}
-              • Tốc độ rải:{' '}
-              <Text style={{ fontWeight: '900', color: '#9D4300' }}>
-                {latestAiRecommendation?.spreadRateKgPerMinute ?? 1.5} kg/phút
+              <Text style={styles.aiBodyText}>
+                Khuyến nghị cữ hiện tại:{' '}
+                <Text style={{ fontWeight: '900', color: '#006E2D' }}>
+                  {aiPredictedKg.toFixed(1)} kg
+                </Text>{' '}
+                • Tốc độ rải:{' '}
+                <Text style={{ fontWeight: '900', color: '#9D4300' }}>
+                  {latestAiRecommendation?.spreadRateKgPerMinute ?? 1.5} kg/phút
+                </Text>
               </Text>
-            </Text>
-            <Text style={styles.aiReasonText}>💡 {aiExplanation}</Text>
+              <Text style={styles.aiReasonText}>💡 {aiExplanation}</Text>
 
-            {aiMeal?.isAiAccepted === undefined && (
-              <View style={styles.aiActionsRow}>
-                <Pressable
-                  onPress={handleAiAccept}
-                  style={({ pressed }) => [
-                    styles.btnAiAccept,
-                    { opacity: pressed ? 0.9 : 1 },
-                  ]}>
-                  <MaterialIcons name="check" size={18} color="#FFFFFF" />
-                  <Text style={styles.btnAiAcceptText}>
-                    Xả theo AI ({aiPredictedKg.toFixed(1)} kg)
-                  </Text>
-                </Pressable>
+              {aiMeal?.isAiAccepted === undefined && (
+                <View style={styles.aiActionsRow}>
+                  <Pressable
+                    onPress={handleAiAccept}
+                    style={({ pressed }) => [
+                      styles.btnAiAccept,
+                      { opacity: pressed ? 0.9 : 1 },
+                    ]}>
+                    <MaterialIcons name="check" size={18} color="#FFFFFF" />
+                    <Text style={styles.btnAiAcceptText}>
+                      Xả theo AI ({aiPredictedKg.toFixed(1)} kg)
+                    </Text>
+                  </Pressable>
 
-                <Pressable
-                  onPress={handleAiKeep}
-                  style={({ pressed }) => [
-                    styles.btnAiKeep,
-                    { opacity: pressed ? 0.9 : 1 },
-                  ]}>
-                  <Text style={styles.btnAiKeepText}>
-                    Giữ nguyên {aiMeal?.targetKg ?? 25} kg
-                  </Text>
-                </Pressable>
-              </View>
-            )}
-          </View>
+                  <Pressable
+                    onPress={handleAiKeep}
+                    style={({ pressed }) => [
+                      styles.btnAiKeep,
+                      { opacity: pressed ? 0.9 : 1 },
+                    ]}>
+                    <Text style={styles.btnAiKeepText}>
+                      Giữ nguyên {aiMeal?.targetKg ?? 25} kg
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          ) : (
+            <View
+              style={[
+                styles.aiCard,
+                {
+                  backgroundColor: colors.surfaceContainerLowest,
+                  borderColor: colors.outlineVariant + '40',
+                  alignItems: 'center',
+                  paddingVertical: 18,
+                },
+              ]}>
+              <MaterialIcons name="psychology" size={32} color={colors.outlineVariant} />
+              <Text style={{ marginTop: 6, fontSize: 13, color: colors.onSurfaceVariant, fontWeight: '600' }}>
+                Chưa có khuyến nghị AI cho ao này
+              </Text>
+            </View>
+          )}
 
           {/* Meal Timeline List */}
           <View style={styles.sectionHeaderRow}>
@@ -411,7 +429,15 @@ export default function ScreenFeedingLog() {
           </View>
 
           <View style={styles.timelineList}>
-            {feedMeals.map((meal) => {
+            {feedMeals.length === 0 ? (
+              <View style={{ paddingVertical: 36, alignItems: 'center' }}>
+                <MaterialIcons name="event-note" size={44} color={colors.outlineVariant} />
+                <Text style={{ marginTop: 8, fontSize: 13, color: colors.onSurfaceVariant }}>
+                  Chưa có dữ liệu lịch cho ăn được thiết lập cho ao này
+                </Text>
+              </View>
+            ) : (
+              feedMeals.map((meal) => {
               const isCompleted = meal.status === 'completed';
               const isActive = meal.status === 'active';
               const isAi = meal.status === 'ai_suggested';
@@ -492,7 +518,7 @@ export default function ScreenFeedingLog() {
                   {meal.notes && <Text style={styles.mealNotes}>📝 {meal.notes}</Text>}
                 </View>
               );
-            })}
+            }))}
           </View>
         </View>
       </ScrollView>

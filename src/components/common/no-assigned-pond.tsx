@@ -22,8 +22,8 @@ export function NoAssignedPondState() {
 
   const handleCallHotline = () => {
     Alert.alert(
-      'Hotline Hỗ Trợ Bờ Ao 24/7',
-      'Kết nối tổng đài kỹ sư ShrimpMate (1800 6868 - Miễn phí) để hỗ trợ kiểm tra phân công ao nuôi.',
+      'Hotline Hỗ Trợ 24/7',
+      'Kết nối tổng đài hỗ trợ ShrimpMate (1800 6868 - Miễn phí) để kiểm tra phân công ao nuôi.',
       [
         { text: 'Hủy', style: 'cancel' },
         {
@@ -81,9 +81,9 @@ export function NoAssignedPondState() {
       <Text style={[styles.desc, { color: colors.onSurfaceVariant }]}>
         Xin chào{' '}
         <Text style={{ fontWeight: '800', color: colors.onSurface }}>
-          {user?.fullName || 'Kỹ thuật viên'}
+          {user?.fullName || 'Người nuôi'}
         </Text>
-        . Tài khoản của bạn hiện chưa được Quản lý đầm (Manager) phân công phụ trách ao nuôi nào trên hệ thống.
+        . Tài khoản của bạn hiện chưa được Quản lý trang trại phân công phụ trách ao nuôi nào trên hệ thống.
       </Text>
 
       <View style={styles.guideBox}>
@@ -92,7 +92,7 @@ export function NoAssignedPondState() {
           <Text style={styles.guideHeading}>Hướng dẫn kích hoạt giám sát ao:</Text>
         </View>
         <Text style={styles.guideStep}>
-          1. Liên hệ Chủ trang trại / Quản lý đầm (Manager) đăng nhập vào cổng Manager Web App.
+          1. Liên hệ Quản lý trang trại đăng nhập vào hệ thống Quản lý Web.
         </Text>
         <Text style={styles.guideStep}>
           2. Quản lý vào mục "Phân công ao nuôi" và gán tài khoản ({user?.phoneNumber || user?.email || 'của bạn'}) vào ao hoặc trang trại cần vận hành.

@@ -13,6 +13,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/use-theme';
 import { useFarm } from '@/context/farm-context';
+import { useAuth } from '@/context/auth-context';
 
 interface LocationInfo {
   label: string;
@@ -58,10 +59,11 @@ export default function ScreenFarmSetup() {
   const insets = useSafeAreaInsets();
   const colors = useTheme();
   const router = useRouter();
+  const { user } = useAuth();
   const { farmInfo, updateFarmInfo } = useFarm();
 
-  const [farmerName, setFarmerName] = useState(farmInfo.farmerName || 'Nguyễn Văn Ba');
-  const [farmName, setFarmName] = useState(farmInfo.farmName || 'Trại Tôm Ba Đầm (Ao 02)');
+  const [farmerName, setFarmerName] = useState(user?.fullName || user?.name || farmInfo.farmerName || '');
+  const [farmName, setFarmName] = useState(farmInfo.farmName || '');
   const [locationKey, setLocationKey] = useState<string>('ben-tre-ba-tri');
   const [scale, setScale] = useState<'1-3' | '4-8' | '8+'>(farmInfo.pondScale || '1-3');
 

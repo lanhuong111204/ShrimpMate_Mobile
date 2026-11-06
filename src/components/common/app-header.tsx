@@ -97,7 +97,7 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
         {/* Left: Brand Logo & Title */}
         <View style={styles.brandGroup}>
           <View style={styles.logoCircle}>
-            <MaterialIcons name="water-drop" size={20} color="#EA580C" />
+            <MaterialIcons name="waves" size={20} color="#EA580C" />
           </View>
           <View>
             <Text style={styles.brandTitle}>ShrimpMate</Text>
@@ -517,18 +517,18 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
               <View style={styles.profileAvatarBox}>
                 <MaterialIcons name="person" size={32} color="#EA580C" />
               </View>
-              <Text style={styles.farmerName}>{user?.fullName || farmInfo.farmerName}</Text>
+              <Text style={styles.farmerName}>{user?.fullName || user?.name || 'Người nuôi'}</Text>
               <Text style={styles.farmTitle}>
-                {user?.email || user?.phoneNumber || farmInfo.farmName}
+                {user?.email || user?.phoneNumber || selectedFarm?.name || 'Chưa cập nhật liên hệ'}
               </Text>
               <View style={styles.vietgapBadge}>
                 <MaterialIcons name="verified" size={16} color="#006E2D" />
                 <Text style={styles.vietgapText}>
                   {user?.role === 'admin'
-                    ? 'Quản trị viên hệ thống'
-                    : user?.role === 'farmer'
-                    ? 'Chủ đầm / Người nuôi tôm'
-                    : 'Chứng nhận VietGAP 2026'}
+                    ? 'Quản trị viên'
+                    : user?.role === 'manager'
+                    ? 'Quản lý trang trại'
+                    : 'Người nuôi'}
                 </Text>
               </View>
             </View>
@@ -536,7 +536,7 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
             <View style={styles.profileDetails}>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Trang trại nuôi:</Text>
-                <Text style={styles.detailVal}>{selectedFarm?.name || farmInfo.farmName}</Text>
+                <Text style={styles.detailVal}>{selectedFarm?.name || 'Chưa liên kết trang trại'}</Text>
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Vị trí khu nuôi:</Text>

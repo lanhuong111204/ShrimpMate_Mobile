@@ -20,7 +20,7 @@ export default function ScreenRegisterGuide() {
 
   const handleCallHotline = () => {
     Alert.alert(
-      'Tổng Đài Hỗ Trợ Kỹ Sư 24/7',
+      'Tổng Đài Hỗ Trợ 24/7',
       'Đang kết nối tới tổng đài hỗ trợ tài khoản và kết nối ao nuôi ShrimpMate: 1800 6868 (Miễn hoàn toàn cước gọi)',
       [
         { text: 'Hủy', style: 'cancel' },
@@ -39,7 +39,7 @@ export default function ScreenRegisterGuide() {
   const handleOpenManagerWeb = () => {
     Alert.alert(
       'Hệ Thống Quản Lý Trang Trại (Manager Web)',
-      'Hệ thống Web dành riêng cho Chủ đầm / Quản lý trang trại để đăng ký tài khoản mới, tạo danh sách ao nuôi và phân công kỹ thuật viên.',
+      'Hệ thống Web dành riêng cho Quản lý trang trại để quản lý ao nuôi và phân công Người nuôi.',
       [
         { text: 'Đóng', style: 'cancel' },
         {
@@ -47,7 +47,7 @@ export default function ScreenRegisterGuide() {
           onPress: () => {
             Alert.alert(
               'Cổng Quản Lý Web',
-              'Vui lòng truy cập trên trình duyệt máy tính theo địa chỉ cổng Quản lý đầm tôm của trang trại bạn.'
+              'Vui lòng truy cập trên trình duyệt máy tính theo địa chỉ cổng Quản lý của trang trại bạn.'
             );
           },
         },
@@ -84,7 +84,7 @@ export default function ScreenRegisterGuide() {
 
             <View style={styles.brandCenter}>
               <View style={styles.logoBox}>
-                <MaterialIcons name="water-drop" size={22} color="#EA580C" />
+                <MaterialIcons name="waves" size={22} color="#EA580C" />
               </View>
               <Text style={[styles.brandName, { color: colors.onSurface }]}>ShrimpMate</Text>
             </View>
@@ -109,7 +109,7 @@ export default function ScreenRegisterGuide() {
                 CẤP PHÁT TÀI KHOẢN BỜ AO
               </Text>
               <Text style={[styles.heroSub, { color: colors.onSurfaceVariant }]}>
-                Ứng dụng di động ShrimpMate Mobile dành riêng cho Người nuôi & Kỹ thuật viên vận hành ao nuôi (Farmer)
+                Ứng dụng di động ShrimpMate Mobile dành riêng cho Người nuôi (Farmer)
               </Text>
             </View>
           </View>
@@ -132,7 +132,7 @@ export default function ScreenRegisterGuide() {
               <Text style={{ fontWeight: '800', color: '#1E40AF' }}>
                 Người nuôi không tự đăng ký tài khoản tự do trên điện thoại
               </Text>
-              . Toàn bộ tài khoản Người nuôi được Quản lý đầm (Manager) tạo và phân công ao nuôi cụ thể.
+              . Toàn bộ tài khoản Người nuôi được Quản lý trang trại tạo và phân công ao nuôi cụ thể.
             </Text>
           </View>
 
@@ -159,7 +159,7 @@ export default function ScreenRegisterGuide() {
                   Liên hệ Quản lý trang trại của bạn
                 </Text>
                 <Text style={[styles.stepDesc, { color: colors.onSurfaceVariant }]}>
-                  Chủ đầm hoặc Kỹ sư quản lý (Manager) sẽ tạo hồ sơ của bạn trên hệ thống Quản lý Web và gán các ao nuôi bạn trực tiếp phụ trách.
+                  Quản lý trang trại sẽ tạo hồ sơ của bạn trên hệ thống Quản lý Web và gán các ao nuôi bạn trực tiếp phụ trách.
                 </Text>
               </View>
             </View>
@@ -210,7 +210,7 @@ export default function ScreenRegisterGuide() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.managerCardTitle, { color: colors.onSurface }]}>
-                  Bạn là Chủ đầm / Quản lý trang trại?
+                  Bạn là Quản lý trang trại?
                 </Text>
                 <Text style={[styles.managerCardSub, { color: colors.onSurfaceVariant }]}>
                   Đăng ký tài khoản Quản lý & thiết lập vuông tôm trên Web
@@ -247,7 +247,7 @@ export default function ScreenRegisterGuide() {
                 Cần hỗ trợ nhận tài khoản ao nuôi?
               </Text>
               <Text style={[styles.hotlineSub, { color: colors.primaryFixed }]}>
-                Kỹ sư ShrimpMate túc trực miễn cước gọi
+                Tổng đài hỗ trợ ShrimpMate túc trực miễn cước gọi
               </Text>
             </View>
 

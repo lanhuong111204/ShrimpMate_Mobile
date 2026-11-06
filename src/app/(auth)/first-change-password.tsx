@@ -103,12 +103,12 @@ export default function ScreenFirstChangePassword() {
           <View style={styles.brandBar}>
             <View style={styles.brandLeft}>
               <View style={styles.logoBox}>
-                <MaterialIcons name="water-drop" size={24} color="#EA580C" />
+                <MaterialIcons name="waves" size={24} color="#EA580C" />
               </View>
               <View>
                 <Text style={[styles.brandName, { color: colors.onSurface }]}>ShrimpMate</Text>
                 <Text style={[styles.brandSub, { color: colors.onSurfaceVariant }]}>
-                  Kích Hoạt Tài Khoản Bờ Ao
+                  Hệ Sinh Thái Nuôi Tôm Thông Minh
                 </Text>
               </View>
             </View>
@@ -145,7 +145,7 @@ export default function ScreenFirstChangePassword() {
                 ĐỔI MẬT KHẨU LẦN ĐẦU
               </Text>
               <Text style={[styles.heroSub, { color: colors.onSurfaceVariant }]}>
-                Xin chào <Text style={{ fontWeight: '800', color: colors.onSurface }}>{user?.fullName || 'Kỹ thuật viên'}</Text>. Tài khoản của bạn được khởi tạo bởi Quản lý đầm. Vui lòng thiết lập mật khẩu cá nhân mới để đảm bảo an toàn sinh học.
+                Xin chào <Text style={{ fontWeight: '800', color: colors.onSurface }}>{user?.fullName || 'Người nuôi'}</Text>. Tài khoản của bạn được khởi tạo bởi Quản lý trang trại. Vui lòng thiết lập mật khẩu cá nhân mới để kích hoạt tài khoản.
               </Text>
             </View>
           </View>

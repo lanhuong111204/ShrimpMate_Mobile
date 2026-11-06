@@ -51,43 +51,12 @@ export function evaluateWaterMetricStatus(
   }
 }
 
-export const INITIAL_MOCK_PONDS: Pond[] = [
-  {
-    id: 'pond-1',
-    name: 'Ao số 1 (Ao nuôi chính)',
-    code: 'AO-01',
-    areaM2: 3000,
-    depthM: 1.6,
-    shrimpCount: 200000,
-    shrimpAgeDays: 45,
-    species: 'Tôm thẻ chân trắng (Vannamei)',
-    status: 'active',
-    createdAt: '2026-09-01T00:00:00.000Z',
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'pond-2',
-    name: 'Ao số 2 (Ao giống)',
-    code: 'AO-02',
-    areaM2: 1500,
-    depthM: 1.4,
-    shrimpCount: 220000,
-    shrimpAgeDays: 20,
-    species: 'Tôm thẻ chân trắng (Vannamei)',
-    status: 'active',
-    createdAt: '2026-09-20T00:00:00.000Z',
-    updatedAt: new Date().toISOString(),
-  },
-];
-
-let pondsState = [...INITIAL_MOCK_PONDS];
-
 export const pondService = {
   /**
    * 10.1. Lấy chỉ số môi trường nước mới nhất (6 Gauges: pH, DO, Nhiệt độ, Độ mặn, NH3, Độ đục)
    * Endpoint: GET /ponds/:pondId/telemetry/latest
    */
-  async getLatestTelemetry(pondId: string): Promise<TelemetryReading> {
+  async getLatestTelemetry(pondId: string): Promise<TelemetryReading | null> {
     try {
       const response = await apiClient.get<TelemetryReading>(Endpoints.telemetry.latest(pondId));
       const data = response.data;
@@ -95,26 +64,12 @@ export const pondService = {
         await Storage.setJSON(`${AppConfig.storageKeys.cachedTelemetry}_${pondId}`, data);
         return data;
       }
-      throw new Error('Empty telemetry response');
+      return null;
     } catch {
       const cached = await Storage.getJSON<TelemetryReading>(
         `${AppConfig.storageKeys.cachedTelemetry}_${pondId}`
       );
-      if (cached) return cached;
-
-      // Fallback dữ liệu chuẩn 6 chỉ số khi ngoại tuyến chưa có cache
-      return {
-        id: `tel-fallback-${pondId}`,
-        pondId,
-        deviceId: 'ESP32_SENSOR_01',
-        measuredAt: new Date().toISOString(),
-        ph: 7.85,
-        dissolvedOxygenMgL: 5.4,
-        temperatureC: 28.5,
-        salinityPpt: 15.2,
-        ammoniaMgL: 0.02,
-        turbidityNtu: 22.0,
-      };
+      return cached || null;
     }
   },
 
@@ -152,7 +107,7 @@ export const pondService = {
         await Storage.setJSON(`${AppConfig.storageKeys.cachedFis}_${pondId}`, data);
         return data;
       }
-      throw new Error('Invalid FIS response');
+      return { hasData: false, pondId };
     } catch {
       const cached = await Storage.getJSON<LatestFisResponse>(
         `${AppConfig.storageKeys.cachedFis}_${pondId}`
@@ -170,25 +125,8 @@ export const pondService = {
       }
 
       return {
-        hasData: true,
+        hasData: false,
         pondId,
-        status: {
-          fisScore: 0.785,
-          appetiteLevel: 3,
-          appetiteLevelDescription: 'Ăn mạnh (Mức 3)',
-          remainingFeedPercent: 8.0,
-          shrimpDensity: 18.5,
-          consumptionVelocity: 0.015,
-          timestamp: new Date(Date.now() - 25 * 1000).toISOString(),
-          ageSeconds: 25,
-          isStale: false,
-        },
-        camera: {
-          id: 'cam-01',
-          name: 'Camera quan sát sàng ăn Ao 1',
-          status: 'online',
-          lastSeenAt: new Date().toISOString(),
-        },
       };
     }
   },
@@ -205,14 +143,14 @@ export const pondService = {
       hasData: true,
       pondId: payload.pondId,
       status: {
-        fisScore: summary?.fisScore ?? log?.fisScore ?? 0.82,
-        appetiteLevel: summary?.appetiteLevel ?? log?.appetiteLevel ?? 3,
-        appetiteLevelDescription: summary?.appetiteLevelDescription ?? 'Ăn mạnh (Mức 3)',
+        fisScore: summary?.fisScore ?? log?.fisScore ?? 0,
+        appetiteLevel: summary?.appetiteLevel ?? log?.appetiteLevel ?? 0,
+        appetiteLevelDescription: summary?.appetiteLevelDescription ?? 'Chưa xác định',
         remainingFeedPercent:
           summary?.feedLeftoverPercent ??
-          (typeof log?.remainingFeedAreaRt === 'number' ? Math.round(log.remainingFeedAreaRt * 100) : 6.0),
-        shrimpDensity: summary?.shrimpDensity ?? log?.shrimpDensityDt ?? 19.2,
-        consumptionVelocity: summary?.consumptionVelocity ?? log?.feedConsumptionVelocityVt ?? 0.016,
+          (typeof log?.remainingFeedAreaRt === 'number' ? Math.round(log.remainingFeedAreaRt * 100) : 0),
+        shrimpDensity: summary?.shrimpDensity ?? log?.shrimpDensityDt ?? 0,
+        consumptionVelocity: summary?.consumptionVelocity ?? log?.feedConsumptionVelocityVt ?? 0,
         timestamp: log?.timestamp || new Date().toISOString(),
         ageSeconds: 1,
         isStale: false,
@@ -252,24 +190,7 @@ export const pondService = {
       const cached = await Storage.getJSON<AiRecommendation>(
         `${AppConfig.storageKeys.cachedAiRec}_${pondId}`
       );
-      if (cached) return cached;
-
-      return {
-        id: `ai-rec-${pondId}`,
-        pondId,
-        modelName: 'ShrimpMate-FeedOpt-v2',
-        modelVersion: '2.1.0',
-        predictedFeedAmountKg: 22.0,
-        spreadRateKgPerMinute: 1.5,
-        appetiteLevel: 3,
-        biomassKg: 780.0,
-        anomalyScore: 0.04,
-        confidence: 0.94,
-        safetyDecision: 'allowed',
-        safetyReason: null,
-        explanation:
-          'Tôm bắt mồi mạnh (FIS=0.79, Mức 3), DO=5.4 mg/L và nhiệt độ 28.5°C nằm trong ngưỡng tối ưu. Khuyến nghị cữ hiện tại 22.0 kg.',
-      };
+      return cached || null;
     }
   },
 
@@ -294,31 +215,7 @@ export const pondService = {
       const cached = await Storage.getJSON<Device[]>(
         `${AppConfig.storageKeys.cachedDevices}_${pondId}`
       );
-      if (cached && cached.length > 0) return cached;
-      return [
-        {
-          id: '22fffa98-46eb-4606-93a0-faae9f70691e',
-          pondId,
-          deviceUid: 'ESP32_FEEDER_01',
-          name: 'Máy cho ăn tự động A1',
-          type: 'feeder',
-          status: 'online',
-          mode: 'automatic',
-          firmwareVersion: '1.2.0',
-          lastSeenAt: new Date().toISOString(),
-          metadata: { hopperCapacityKg: 150 },
-        },
-        {
-          id: 'cam-device-01',
-          pondId,
-          deviceUid: 'CAM-01-A1',
-          name: 'Camera giám sát sàng ăn Ao 1',
-          type: 'camera',
-          status: 'online',
-          firmwareVersion: '1.0.0',
-          lastSeenAt: new Date().toISOString(),
-        },
-      ];
+      return cached || [];
     }
   },
 
@@ -390,11 +287,14 @@ export const pondService = {
       }
       throw new Error('Invalid safety evaluate response');
     } catch {
-      // Đánh giá an toàn cục bộ theo đúng ngưỡng sinh học khi mất sóng bờ ao
-      const doVal = fallbackTelemetry?.dissolvedOxygenMgL ?? 5.4;
-      const phVal = fallbackTelemetry?.ph ?? 7.85;
-      const nh3Val = fallbackTelemetry?.ammoniaMgL ?? 0.02;
-      const tempVal = fallbackTelemetry?.temperatureC ?? 28.5;
+      // Đánh giá an toàn cục bộ theo đúng ngưỡng sinh học khi có dữ liệu đo mới nhất trong cache
+      if (!fallbackTelemetry || typeof fallbackTelemetry.dissolvedOxygenMgL !== 'number') {
+        throw new Error('Không thể đánh giá an toàn sinh học do mất kết nối máy chủ và chưa có dữ liệu đo mới nhất');
+      }
+      const doVal = fallbackTelemetry.dissolvedOxygenMgL;
+      const phVal = fallbackTelemetry.ph;
+      const nh3Val = fallbackTelemetry.ammoniaMgL;
+      const tempVal = fallbackTelemetry.temperatureC;
 
       const reasons: string[] = [];
       const appliedRules: string[] = [];
@@ -537,18 +437,18 @@ export const pondService = {
   async getPonds(): Promise<Pond[]> {
     try {
       const response = await apiClient.get<Pond[]>(Endpoints.ponds.list);
-      return response.data;
+      return Array.isArray(response.data) ? response.data : [];
     } catch {
-      return pondsState;
+      return [];
     }
   },
 
   async getPondById(id: string): Promise<Pond | null> {
     try {
       const response = await apiClient.get<Pond>(Endpoints.ponds.detail(id));
-      return response.data;
+      return response.data || null;
     } catch {
-      return pondsState.find((p) => p.id === id) ?? null;
+      return null;
     }
   },
 
