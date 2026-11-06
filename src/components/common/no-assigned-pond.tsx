@@ -5,8 +5,6 @@ import {
   View,
   Pressable,
   ActivityIndicator,
-  Linking,
-  Alert,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/use-theme';
@@ -19,24 +17,6 @@ export function NoAssignedPondState() {
   const { isLoadingFarms, isLoadingPonds, refreshFarmsAndPonds } = useFarm();
 
   const isLoading = isLoadingFarms || isLoadingPonds;
-
-  const handleCallHotline = () => {
-    Alert.alert(
-      'Hotline Hỗ Trợ Bờ Ao 24/7',
-      'Kết nối tổng đài kỹ sư ShrimpMate (1800 6868 - Miễn phí) để hỗ trợ kiểm tra phân công ao nuôi.',
-      [
-        { text: 'Hủy', style: 'cancel' },
-        {
-          text: 'Gọi 1800 6868',
-          onPress: () => {
-            Linking.openURL('tel:18006868').catch(() => {
-              Alert.alert('Thông Báo', 'Vui lòng gọi số 1800 6868.');
-            });
-          },
-        },
-      ]
-    );
-  };
 
   if (isLoading) {
     return (
@@ -81,9 +61,9 @@ export function NoAssignedPondState() {
       <Text style={[styles.desc, { color: colors.onSurfaceVariant }]}>
         Xin chào{' '}
         <Text style={{ fontWeight: '800', color: colors.onSurface }}>
-          {user?.fullName || 'Kỹ thuật viên'}
+          {user?.fullName || 'Người nuôi'}
         </Text>
-        . Tài khoản của bạn hiện chưa được Quản lý đầm (Manager) phân công phụ trách ao nuôi nào trên hệ thống.
+        . Tài khoản của bạn hiện chưa được Quản lý trang trại phân công phụ trách ao nuôi nào trên hệ thống.
       </Text>
 
       <View style={styles.guideBox}>
@@ -92,7 +72,7 @@ export function NoAssignedPondState() {
           <Text style={styles.guideHeading}>Hướng dẫn kích hoạt giám sát ao:</Text>
         </View>
         <Text style={styles.guideStep}>
-          1. Liên hệ Chủ trang trại / Quản lý đầm (Manager) đăng nhập vào cổng Manager Web App.
+          1. Liên hệ Quản lý trang trại đăng nhập vào hệ thống Quản lý Web.
         </Text>
         <Text style={styles.guideStep}>
           2. Quản lý vào mục "Phân công ao nuôi" và gán tài khoản ({user?.phoneNumber || user?.email || 'của bạn'}) vào ao hoặc trang trại cần vận hành.
@@ -111,16 +91,6 @@ export function NoAssignedPondState() {
           ]}>
           <MaterialIcons name="refresh" size={20} color="#FFFFFF" />
           <Text style={styles.btnRefreshText}>KIỂM TRA LẠI PHÂN CÔNG AO</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={handleCallHotline}
-          style={({ pressed }) => [
-            styles.btnSupport,
-            { opacity: pressed ? 0.85 : 1 },
-          ]}>
-          <MaterialIcons name="support-agent" size={18} color="#EA580C" />
-          <Text style={styles.btnSupportText}>GỌI HỖ TRỢ KỸ THUẬT 1800 6868</Text>
         </Pressable>
       </View>
     </View>

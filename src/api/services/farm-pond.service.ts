@@ -220,12 +220,20 @@ export const farmPondService = {
         }
       }
 
+      ponds = ponds.map((p: any) => ({
+        ...p,
+        areaM2: p.areaM2 !== undefined && p.areaM2 !== null ? Number(p.areaM2) : undefined,
+      }));
+
       await Storage.setJSON(cacheKey, ponds);
       return ponds;
     } catch (error) {
       const cached = await Storage.getJSON<Pond[]>(cacheKey);
       if (cached && Array.isArray(cached)) {
-        return cached;
+        return cached.map((p: any) => ({
+          ...p,
+          areaM2: p.areaM2 !== undefined && p.areaM2 !== null ? Number(p.areaM2) : undefined,
+        }));
       }
       throw error;
     }

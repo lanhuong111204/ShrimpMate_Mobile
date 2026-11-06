@@ -44,6 +44,16 @@ export default function ScreenFeedingLog() {
   const [safetyPreview, setSafetyPreview] = useState<EvaluateSafetyResponse | null>(null);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [isSubmittingExtra, setIsSubmittingExtra] = useState(false);
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+
+  const handlePullRefresh = async (refreshAction: () => Promise<void>) => {
+    setIsManualRefreshing(true);
+    try {
+      await refreshAction();
+    } finally {
+      setIsManualRefreshing(false);
+    }
+  };
 
   const hasAssignedPond = Boolean(selectedPond && ponds.length > 0);
   if (!hasAssignedPond) {
@@ -55,8 +65,8 @@ export default function ScreenFeedingLog() {
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
-              refreshing={isRefreshingPondData}
-              onRefresh={refreshFarmsAndPonds}
+              refreshing={isManualRefreshing}
+              onRefresh={() => handlePullRefresh(refreshFarmsAndPonds)}
               colors={['#EA580C']}
               tintColor="#EA580C"
             />
@@ -72,16 +82,17 @@ export default function ScreenFeedingLog() {
   // Tìm cữ gợi ý AI hoặc cữ chiều
   const aiMeal = feedMeals.find((m) => m.status === 'ai_suggested' || m.id === 'meal-3') || feedMeals[0];
   const aiPredictedKg =
-    latestAiRecommendation?.predictedFeedAmountKg ?? aiMeal?.aiSuggestedKg ?? 22.0;
-  const aiBiomassKg = latestAiRecommendation?.biomassKg ?? 780.0;
-  const aiModelName = latestAiRecommendation?.modelName || 'ShrimpMate-FeedOpt-v2';
-  const aiExplanation =
-    latestAiRecommendation?.explanation ||
-    'Tôm bắt mồi mạnh (FIS cao), DO và nhiệt độ nằm trong ngưỡng tối ưu.';
+    Number(latestAiRecommendation?.predictedFeedAmountKg ?? aiMeal?.aiSuggestedKg ?? 0) || 0;
+  const aiBiomassKg =
+    latestAiRecommendation?.biomassKg !== undefined && latestAiRecommendation?.biomassKg !== null
+      ? Number(latestAiRecommendation.biomassKg)
+      : undefined;
+  const aiModelName = latestAiRecommendation?.modelName || 'ShrimpMate-AI';
+  const aiExplanation = latestAiRecommendation?.explanation || '';
 
   // Summary computations
-  const totalTargetKg = feedMeals.reduce((acc, m) => acc + m.targetKg, 0);
-  const totalDispensedKg = feedMeals.reduce((acc, m) => acc + m.dispensedKg, 0);
+  const totalTargetKg = feedMeals.reduce((acc, m) => acc + (Number(m.targetKg) || 0), 0);
+  const totalDispensedKg = feedMeals.reduce((acc, m) => acc + (Number(m.dispensedKg) || 0), 0);
   const remainingKg = Math.max(0, totalTargetKg - totalDispensedKg);
   const overallPercent =
     totalTargetKg > 0 ? Math.round((totalDispensedKg / totalTargetKg) * 100) : 0;
@@ -117,7 +128,7 @@ export default function ScreenFeedingLog() {
     }
     Alert.alert(
       'Giữ Nguyên Khẩu Phần',
-      `Đã lưu khẩu phần ${aiMeal?.targetKg ?? 25} kg theo quyết định của kỹ thuật viên.`
+      `Đã lưu khẩu phần ${aiMeal?.targetKg ?? 25} kg theo quyết định của người nuôi.`
     );
   };
 
@@ -128,6 +139,8 @@ export default function ScreenFeedingLog() {
     try {
       const ev = await evaluateSafetyBeforeFeed(parsed);
       setSafetyPreview(ev);
+    } catch {
+      setSafetyPreview(null);
     } finally {
       setIsEvaluating(false);
     }
@@ -141,6 +154,8 @@ export default function ScreenFeedingLog() {
       try {
         const ev = await evaluateSafetyBeforeFeed(parsed);
         setSafetyPreview(ev);
+      } catch {
+        setSafetyPreview(null);
       } finally {
         setIsEvaluating(false);
       }
@@ -184,14 +199,22 @@ export default function ScreenFeedingLog() {
 
   const pondDisplayName = selectedPond?.name || selectedPond?.code || farmInfo.selectedPond;
   const pondAreaDesc = selectedPond?.areaM2
-    ? `${selectedPond.areaM2.toLocaleString('vi-VN')} m² • ${
+    ? `${Number(selectedPond.areaM2).toLocaleString('vi-VN')} m² • ${
         selectedPond.status === 'maintenance' ? 'Đang bảo dưỡng' : 'Ao được phân công'
       }`
     : 'Tôm thẻ chân trắng • Ao được phân công';
 
-  const waterTemp = latestTelemetry?.temperatureC ?? farmInfo.waterTemp;
-  const doVal = latestTelemetry?.dissolvedOxygenMgL ?? farmInfo.dissolvedOxygen;
-  const fisLevel = latestFis?.status?.appetiteLevel ?? 3;
+  const rawWaterTemp = latestTelemetry?.temperatureC ?? farmInfo.waterTemp;
+  const waterTemp =
+    rawWaterTemp !== undefined && rawWaterTemp !== null && !isNaN(Number(rawWaterTemp))
+      ? Number(rawWaterTemp)
+      : undefined;
+  const rawDoVal = latestTelemetry?.dissolvedOxygenMgL ?? farmInfo.dissolvedOxygen;
+  const doVal =
+    rawDoVal !== undefined && rawDoVal !== null && !isNaN(Number(rawDoVal))
+      ? Number(rawDoVal)
+      : undefined;
+  const fisLevel = latestFis?.hasData ? latestFis?.status?.appetiteLevel : undefined;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.surface }]}>
@@ -202,8 +225,8 @@ export default function ScreenFeedingLog() {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={isRefreshingPondData}
-            onRefresh={refreshPondOperationalData}
+            refreshing={isManualRefreshing}
+            onRefresh={() => handlePullRefresh(refreshPondOperationalData)}
             colors={['#EA580C']}
             tintColor="#EA580C"
           />
@@ -241,10 +264,14 @@ export default function ScreenFeedingLog() {
             </View>
 
             <View style={styles.weatherBox}>
-              <Text style={styles.weatherLabel}>DO: {doVal} mg/L</Text>
+              <Text style={styles.weatherLabel}>
+                DO: {doVal !== undefined ? doVal.toFixed(1) : '--'} mg/L
+              </Text>
               <View style={styles.tempRow}>
                 <MaterialIcons name="wb-sunny" size={16} color="#F97316" />
-                <Text style={styles.tempVal}>{waterTemp}°C</Text>
+                <Text style={styles.tempVal}>
+                  {waterTemp !== undefined ? waterTemp.toFixed(1) : '--'}°C
+                </Text>
               </View>
             </View>
           </Pressable>
@@ -268,7 +295,7 @@ export default function ScreenFeedingLog() {
               <View style={[styles.badgePill, { backgroundColor: colors.secondaryContainer }]}>
                 <View style={[styles.dot, { backgroundColor: colors.secondary }]} />
                 <Text style={[styles.badgeText, { color: colors.onSecondaryContainer }]}>
-                  {feedMeals.length} Cữ • FIS Mức {fisLevel}
+                  {fisLevel !== undefined ? `${feedMeals.length} Cữ • Mức ăn ${fisLevel}` : `${feedMeals.length} Cữ ăn`}
                 </Text>
               </View>
             </View>
@@ -304,7 +331,9 @@ export default function ScreenFeedingLog() {
               <View style={styles.progressLabels}>
                 <Text style={styles.progressPercentText}>{overallPercent}% khẩu phần</Text>
                 <Text style={styles.progressSubText}>
-                  Sinh khối ước tính: {aiBiomassKg} kg
+                  {aiBiomassKg !== undefined
+                    ? `Sinh khối ước tính: ${aiBiomassKg} kg`
+                    : 'Sinh khối: Chưa có dữ liệu'}
                 </Text>
               </View>
               <View
@@ -326,92 +355,118 @@ export default function ScreenFeedingLog() {
           </View>
 
           {/* AI Recommendation Summary Card (UC014 - GET /ponds/:pondId/ai/recommendations/latest) */}
-          <View
-            style={[
-              styles.aiCard,
-              {
-                backgroundColor:
-                  aiMeal?.isAiAccepted === true
-                    ? '#E8F5E9'
-                    : aiMeal?.isAiAccepted === false
-                    ? '#FFF3E0'
-                    : '#FFF8F5',
-                borderColor: aiMeal?.isAiAccepted === true ? '#7CF994' : '#F97316',
-              },
-            ]}>
-            <View style={styles.aiHeader}>
-              <View style={styles.aiBadgeGroup}>
-                <MaterialIcons name="auto-awesome" size={20} color="#F97316" />
-                <Text style={styles.aiBadgeTitle}>
-                  KHUYẾN NGHỊ AI ({aiModelName.toUpperCase()})
-                </Text>
+          {latestAiRecommendation ? (
+            <View
+              style={[
+                styles.aiCard,
+                {
+                  backgroundColor:
+                    aiMeal?.isAiAccepted === true
+                      ? '#E8F5E9'
+                      : aiMeal?.isAiAccepted === false
+                      ? '#FFF3E0'
+                      : '#FFF8F5',
+                  borderColor: aiMeal?.isAiAccepted === true ? '#7CF994' : '#F97316',
+                },
+              ]}>
+              <View style={styles.aiHeader}>
+                <View style={styles.aiBadgeGroup}>
+                  <MaterialIcons name="auto-awesome" size={20} color="#F97316" />
+                  <Text style={styles.aiBadgeTitle}>
+                    KHUYẾN NGHỊ AI ({aiModelName.toUpperCase()})
+                  </Text>
+                </View>
+                <View style={styles.aiStatusBadge}>
+                  <Text style={styles.aiStatusText}>
+                    {aiMeal?.isAiAccepted === true
+                      ? '✓ ĐÃ ÁP DỤNG'
+                      : aiMeal?.isAiAccepted === false
+                      ? 'GIỮ ĐỊNH MỨC'
+                      : `TIN CẬY ${Math.round((latestAiRecommendation?.confidence ?? 0.94) * 100)}%`}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.aiStatusBadge}>
-                <Text style={styles.aiStatusText}>
-                  {aiMeal?.isAiAccepted === true
-                    ? '✓ ĐÃ ÁP DỤNG'
-                    : aiMeal?.isAiAccepted === false
-                    ? 'GIỮ ĐỊNH MỨC'
-                    : `TIN CẬY ${Math.round((latestAiRecommendation?.confidence ?? 0.94) * 100)}%`}
-                </Text>
-              </View>
-            </View>
 
-            <Text style={styles.aiBodyText}>
-              Khuyến nghị cữ hiện tại:{' '}
-              <Text style={{ fontWeight: '900', color: '#006E2D' }}>
-                {aiPredictedKg.toFixed(1)} kg
-              </Text>{' '}
-              • Tốc độ rải:{' '}
-              <Text style={{ fontWeight: '900', color: '#9D4300' }}>
-                {latestAiRecommendation?.spreadRateKgPerMinute ?? 1.5} kg/phút
+              <Text style={styles.aiBodyText}>
+                Khuyến nghị cữ hiện tại:{' '}
+                <Text style={{ fontWeight: '900', color: '#006E2D' }}>
+                  {aiPredictedKg.toFixed(1)} kg
+                </Text>{' '}
+                • Tốc độ rải:{' '}
+                <Text style={{ fontWeight: '900', color: '#9D4300' }}>
+                  {latestAiRecommendation?.spreadRateKgPerMinute ?? 1.5} kg/phút
+                </Text>
               </Text>
-            </Text>
-            <Text style={styles.aiReasonText}>💡 {aiExplanation}</Text>
+              <Text style={styles.aiReasonText}>💡 {aiExplanation}</Text>
 
-            {aiMeal?.isAiAccepted === undefined && (
-              <View style={styles.aiActionsRow}>
-                <Pressable
-                  onPress={handleAiAccept}
-                  style={({ pressed }) => [
-                    styles.btnAiAccept,
-                    { opacity: pressed ? 0.9 : 1 },
-                  ]}>
-                  <MaterialIcons name="check" size={18} color="#FFFFFF" />
-                  <Text style={styles.btnAiAcceptText}>
-                    Xả theo AI ({aiPredictedKg.toFixed(1)} kg)
-                  </Text>
-                </Pressable>
+              {aiMeal?.isAiAccepted === undefined && (
+                <View style={styles.aiActionsRow}>
+                  <Pressable
+                    onPress={handleAiAccept}
+                    style={({ pressed }) => [
+                      styles.btnAiAccept,
+                      { opacity: pressed ? 0.9 : 1 },
+                    ]}>
+                    <MaterialIcons name="check" size={18} color="#FFFFFF" />
+                    <Text style={styles.btnAiAcceptText}>
+                      Xả theo AI ({aiPredictedKg.toFixed(1)} kg)
+                    </Text>
+                  </Pressable>
 
-                <Pressable
-                  onPress={handleAiKeep}
-                  style={({ pressed }) => [
-                    styles.btnAiKeep,
-                    { opacity: pressed ? 0.9 : 1 },
-                  ]}>
-                  <Text style={styles.btnAiKeepText}>
-                    Giữ nguyên {aiMeal?.targetKg ?? 25} kg
-                  </Text>
-                </Pressable>
-              </View>
-            )}
-          </View>
+                  <Pressable
+                    onPress={handleAiKeep}
+                    style={({ pressed }) => [
+                      styles.btnAiKeep,
+                      { opacity: pressed ? 0.9 : 1 },
+                    ]}>
+                    <Text style={styles.btnAiKeepText}>
+                      Giữ nguyên {aiMeal?.targetKg ?? 25} kg
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          ) : (
+            <View
+              style={[
+                styles.aiCard,
+                {
+                  backgroundColor: colors.surfaceContainerLowest,
+                  borderColor: colors.outlineVariant + '40',
+                  alignItems: 'center',
+                  paddingVertical: 18,
+                },
+              ]}>
+              <MaterialIcons name="psychology" size={32} color={colors.outlineVariant} />
+              <Text style={{ marginTop: 6, fontSize: 13, color: colors.onSurfaceVariant, fontWeight: '600' }}>
+                Chưa có khuyến nghị AI cho ao này
+              </Text>
+            </View>
+          )}
 
           {/* Meal Timeline List */}
           <View style={styles.sectionHeaderRow}>
-            <Text style={[styles.sectionTitle, { color: colors.onSurface }]}>
+            <Text style={[styles.sectionTitle, { color: colors.onSurface, flex: 1, marginRight: 8 }]}>
               LỊCH CHO ĂN & NHẬT KÝ CỮ ĂN
             </Text>
             <Pressable
               onPress={handleOpenQuickFeedModal}
-              style={[styles.addMealBtn, { backgroundColor: '#FFDBCA' }]}>
+              style={[styles.addMealBtn, { backgroundColor: '#FFDBCA', flexShrink: 0 }]}>
               <MaterialIcons name="bolt" size={16} color="#9D4300" />
-              <Text style={styles.addMealText}>Cho Ăn Nhanh (Quick Feed)</Text>
+              <Text style={styles.addMealText}>Cho Ăn Nhanh</Text>
             </Pressable>
           </View>
 
           <View style={styles.timelineList}>
-            {feedMeals.map((meal) => {
+            {feedMeals.length === 0 ? (
+              <View style={{ paddingVertical: 36, alignItems: 'center' }}>
+                <MaterialIcons name="event-note" size={44} color={colors.outlineVariant} />
+                <Text style={{ marginTop: 8, fontSize: 13, color: colors.onSurfaceVariant }}>
+                  Chưa có dữ liệu lịch cho ăn được thiết lập cho ao này
+                </Text>
+              </View>
+            ) : (
+              feedMeals.map((meal) => {
               const isCompleted = meal.status === 'completed';
               const isActive = meal.status === 'active';
               const isAi = meal.status === 'ai_suggested';
@@ -492,7 +547,7 @@ export default function ScreenFeedingLog() {
                   {meal.notes && <Text style={styles.mealNotes}>📝 {meal.notes}</Text>}
                 </View>
               );
-            })}
+            }))}
           </View>
         </View>
       </ScrollView>

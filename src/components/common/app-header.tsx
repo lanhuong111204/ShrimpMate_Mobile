@@ -77,12 +77,13 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
     router.replace('/(auth)/login');
   };
 
-  // Tên hiển thị trên nút Pill ao nuôi (đảm bảo đồng bộ 100% với danh sách trong Modal)
+  // Tên hiển thị ngắn gọn trên nút Pill ao nuôi (tránh bị cắt dấu ...)
   const hasAssignedPond = Boolean(selectedPond || ponds.length > 0);
-  const displayPondName =
+  const rawPondName =
     selectedPond?.name ||
     selectedPond?.code ||
     (ponds.length > 0 ? ponds[0].name || ponds[0].code : 'Không có ao');
+  const displayPondName = rawPondName.split(/\s*[-–]\s*/)[0].trim() || rawPondName;
 
   return (
     <View
@@ -97,12 +98,12 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
         {/* Left: Brand Logo & Title */}
         <View style={styles.brandGroup}>
           <View style={styles.logoCircle}>
-            <MaterialIcons name="water-drop" size={20} color="#EA580C" />
+            <MaterialIcons name="waves" size={20} color="#EA580C" />
           </View>
-          <View>
-            <Text style={styles.brandTitle}>ShrimpMate</Text>
+          <View style={{ flex: 1 }}>
+            <Text numberOfLines={1} style={styles.brandTitle}>ShrimpMate</Text>
             <Text numberOfLines={1} style={styles.brandSubtitle}>
-              {selectedFarm?.name ? `${selectedFarm.name} • ${subtitle}` : subtitle}
+              {selectedFarm?.name || subtitle}
             </Text>
           </View>
         </View>
@@ -517,18 +518,18 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
               <View style={styles.profileAvatarBox}>
                 <MaterialIcons name="person" size={32} color="#EA580C" />
               </View>
-              <Text style={styles.farmerName}>{user?.fullName || farmInfo.farmerName}</Text>
+              <Text style={styles.farmerName}>{user?.fullName || user?.name || 'Người nuôi'}</Text>
               <Text style={styles.farmTitle}>
-                {user?.email || user?.phoneNumber || farmInfo.farmName}
+                {user?.email || user?.phoneNumber || selectedFarm?.name || 'Chưa cập nhật liên hệ'}
               </Text>
               <View style={styles.vietgapBadge}>
                 <MaterialIcons name="verified" size={16} color="#006E2D" />
                 <Text style={styles.vietgapText}>
                   {user?.role === 'admin'
-                    ? 'Quản trị viên hệ thống'
-                    : user?.role === 'farmer'
-                    ? 'Chủ đầm / Người nuôi tôm'
-                    : 'Chứng nhận VietGAP 2026'}
+                    ? 'Quản trị viên'
+                    : user?.role === 'manager'
+                    ? 'Quản lý trang trại'
+                    : 'Người nuôi'}
                 </Text>
               </View>
             </View>
@@ -536,7 +537,7 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
             <View style={styles.profileDetails}>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Trang trại nuôi:</Text>
-                <Text style={styles.detailVal}>{selectedFarm?.name || farmInfo.farmName}</Text>
+                <Text style={styles.detailVal}>{selectedFarm?.name || 'Chưa liên kết trang trại'}</Text>
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Vị trí khu nuôi:</Text>
@@ -603,6 +604,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flex: 1,
+    marginRight: 8,
   },
   logoCircle: {
     width: 34,
@@ -611,10 +614,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   brandTitle: {
     color: '#FFFFFF',
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '900',
     letterSpacing: -0.3,
   },
@@ -626,42 +630,43 @@ const styles = StyleSheet.create({
   rightActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    flexShrink: 0,
   },
   pondPill: {
-    height: 38,
-    paddingHorizontal: 10,
+    height: 34,
+    paddingHorizontal: 9,
     borderRadius: 999,
     backgroundColor: 'rgba(255, 255, 255, 0.22)',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    maxWidth: 140,
+    gap: 4,
+    maxWidth: 112,
   },
   onlineDot: {
-    width: 8,
-    height: 8,
+    width: 7,
+    height: 7,
     borderRadius: 4,
     backgroundColor: '#7FFC97',
   },
   pondPillText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
     flexShrink: 1,
   },
   iconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: 'rgba(255, 255, 255, 0.22)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   notiBadge: {
     position: 'absolute',
-    top: 8,
-    right: 8,
+    top: 6,
+    right: 6,
     width: 8,
     height: 8,
     borderRadius: 4,
@@ -670,9 +675,9 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
   },
   avatarBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',

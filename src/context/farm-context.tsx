@@ -18,15 +18,15 @@ export interface FarmInfo {
   farmerName: string;
   farmName: string;
   location: string;
-  salinity: number; // ‰
-  tideInfo: string;
-  pondScale: '1-3' | '4-8' | '8+';
+  salinity?: number; // ‰
+  tideInfo?: string;
+  pondScale?: '1-3' | '4-8' | '8+';
   selectedPond: string;
-  waterTemp: number; // °C
-  dissolvedOxygen: number; // mg/L
-  ph: number;
-  nh3: number; // mg/L
-  turbidity: number; // NTU
+  waterTemp?: number; // °C
+  dissolvedOxygen?: number; // mg/L
+  ph?: number;
+  nh3?: number; // mg/L
+  turbidity?: number; // NTU
   measuredAt?: string;
 }
 
@@ -129,131 +129,15 @@ interface FarmContextType {
 }
 
 const initialFarmInfo: FarmInfo = {
-  farmerName: 'Nguyễn Văn Ba',
-  farmName: 'Trang trại Nuôi Tôm Sông Xanh',
-  location: 'Bạc Liêu - Huyện Hòa Bình',
-  salinity: 15.2,
-  tideInfo: 'Hôm nay: 16:30 (+1.8m) • Lấy nước tốt',
-  pondScale: '1-3',
-  selectedPond: 'Ao nuôi số 1 - Khu A',
-  waterTemp: 28.5,
-  dissolvedOxygen: 5.4,
-  ph: 7.85,
-  nh3: 0.02,
-  turbidity: 22.0,
-  measuredAt: new Date().toISOString(),
+  farmerName: '',
+  farmName: '',
+  location: '',
+  selectedPond: '',
 };
 
-const initialMeals: FeedingMeal[] = [
-  {
-    id: 'meal-1',
-    time: '06:30',
-    name: 'Cữ 1 (Sáng)',
-    period: 'Sáng',
-    status: 'completed',
-    feedType: 'Cám số 2 hạt nổi (Grobest)',
-    targetKg: 22.0,
-    dispensedKg: 22.0,
-    progressPercent: 100,
-    notes: 'Rải lúc 06:31 - 06:46 • Nhá ăn sạch 94% (FIS=0.82)',
-  },
-  {
-    id: 'meal-2',
-    time: '10:30',
-    name: 'Cữ 2 (Trưa)',
-    period: 'Trưa',
-    status: 'active',
-    feedType: 'Cám số 2 hạt nổi (Grobest)',
-    targetKg: 25.0,
-    dispensedKg: 18.5,
-    speedKgPerMin: 1.5,
-    estRemainingMinutes: 5,
-    progressPercent: 74,
-    notes: 'Đang phun cám tự động • Safety Decision: Allowed',
-  },
-  {
-    id: 'meal-3',
-    time: '14:30',
-    name: 'Cữ 3 (Chiều)',
-    period: 'Chiều',
-    status: 'ai_suggested',
-    feedType: 'Cám số 2 hạt nổi (Grobest)',
-    targetKg: 25.0,
-    dispensedKg: 0,
-    aiSuggestedKg: 22.0,
-    notes: 'AI đề xuất 22.0kg theo sinh khối & oxy hòa tan',
-    isAiAccepted: undefined,
-  },
-  {
-    id: 'meal-4',
-    time: '18:30',
-    name: 'Cữ 4 (Tối)',
-    period: 'Tối',
-    status: 'pending',
-    feedType: 'Trộn Men Tỏi + Cám số 2',
-    targetKg: 23.0,
-    dispensedKg: 0,
-    notes: 'Bật quạt nước tăng oxy trước 15 phút',
-  },
-];
+const initialMeals: FeedingMeal[] = [];
 
-const initialInventory: InventoryItem[] = [
-  {
-    id: 'feed-1',
-    name: 'Cám Số 2 - Grobest',
-    category: 'feed',
-    spec: 'Bao 25kg • Protein 40%',
-    subtitle: 'Thức ăn tôm thẻ 30-60 ngày',
-    stockCount: 42,
-    unit: 'bao',
-    totalKgOrL: 1050,
-    stockStatus: 'good',
-  },
-  {
-    id: 'feed-2',
-    name: 'Cám Số 1 - Cargill',
-    category: 'feed',
-    spec: 'Bao 20kg • Protein 42%',
-    subtitle: 'Thức ăn tôm giống nhỏ',
-    stockCount: 8,
-    unit: 'bao',
-    totalKgOrL: 160,
-    stockStatus: 'low',
-  },
-  {
-    id: 'water-1',
-    name: 'Khoáng Tạt Dạng Bột Cal-Phos',
-    category: 'water',
-    spec: 'Bao 25kg • Bổ sung Canxi & Magie',
-    subtitle: 'Cứng vỏ nhanh sau lột xác',
-    stockCount: 16,
-    unit: 'bao',
-    totalKgOrL: 400,
-    stockStatus: 'good',
-  },
-  {
-    id: 'prob-1',
-    name: 'Men Vi Sinh Xử Lý Đáy Ao BZT',
-    category: 'probiotics',
-    spec: 'Can 5 lít • Vi sinh đậm đặc',
-    subtitle: 'Phân hủy mùn bã và nhớt bạt',
-    stockCount: 12,
-    unit: 'can',
-    totalKgOrL: 60,
-    stockStatus: 'good',
-  },
-  {
-    id: 'prob-2',
-    name: 'Men Tiêu Hóa Dạng Lỏng Bio-Gut',
-    category: 'probiotics',
-    spec: 'Chai 1 lít • Enzyme tiêu hóa',
-    subtitle: 'Trộn cữ tối phòng phân trắng',
-    stockCount: 5,
-    unit: 'chai',
-    totalKgOrL: 5,
-    stockStatus: 'low',
-  },
-];
+const initialInventory: InventoryItem[] = [];
 
 function getPeriodFromTime(timeOfDay: string): 'Sáng' | 'Trưa' | 'Chiều' | 'Tối' {
   const hour = parseInt(timeOfDay.split(':')[0] || '8', 10);
@@ -291,17 +175,17 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
 
   // Trạng thái bảo lưu tương thích UI
   const [farmInfo, setFarmInfo] = useState<FarmInfo>(initialFarmInfo);
-  const [feedMeals, setFeedMeals] = useState<FeedingMeal[]>(initialMeals);
-  const [inventory, setInventory] = useState<InventoryItem[]>(initialInventory);
-  const [dispensedKg, setDispensedKg] = useState<number>(18.5);
-  const [targetKg, setTargetKg] = useState<number>(25.0);
+  const [feedMeals, setFeedMeals] = useState<FeedingMeal[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [dispensedKg, setDispensedKg] = useState<number>(0);
+  const [targetKg, setTargetKg] = useState<number>(0);
   const [feederPaused, setFeederPaused] = useState<boolean>(false);
   const [feederRadius, setFeederRadius] = useState<'3m' | '6m' | '9m'>('6m');
-  const [hopperKg, setHopperKg] = useState<number>(120);
+  const [hopperKg, setHopperKg] = useState<number>(0);
   const [isEmergencyStopped, setIsEmergencyStopped] = useState<boolean>(false);
   const [appetiteLevel, setAppetiteLevelState] = useState<'weak' | 'strong' | 'skip'>('strong');
-  const [fisAppetiteLevel, setFisAppetiteLevelState] = useState<AppetiteLevel>(3);
-  const [trayCleanPercent, setTrayCleanPercent] = useState<number>(92);
+  const [fisAppetiteLevel, setFisAppetiteLevelState] = useState<AppetiteLevel>(0);
+  const [trayCleanPercent, setTrayCleanPercent] = useState<number>(0);
   const [isScanningTray, setIsScanningTray] = useState<boolean>(false);
 
   const feederDevice: Device | null =
@@ -328,20 +212,33 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
 
       // 1. Cập nhật Telemetry 6 chỉ số
       setLatestTelemetry(telemetry);
-      setFarmInfo((prev) => ({
-        ...prev,
-        waterTemp: telemetry.temperatureC,
-        dissolvedOxygen: telemetry.dissolvedOxygenMgL,
-        ph: telemetry.ph,
-        salinity: telemetry.salinityPpt,
-        nh3: telemetry.ammoniaMgL,
-        turbidity: telemetry.turbidityNtu,
-        measuredAt: telemetry.measuredAt,
-      }));
+      if (telemetry) {
+        setFarmInfo((prev) => ({
+          ...prev,
+          waterTemp: telemetry.temperatureC,
+          dissolvedOxygen: telemetry.dissolvedOxygenMgL,
+          ph: telemetry.ph,
+          salinity: telemetry.salinityPpt,
+          nh3: telemetry.ammoniaMgL,
+          turbidity: telemetry.turbidityNtu,
+          measuredAt: telemetry.measuredAt,
+        }));
+      } else {
+        setFarmInfo((prev) => ({
+          ...prev,
+          waterTemp: undefined,
+          dissolvedOxygen: undefined,
+          ph: undefined,
+          salinity: undefined,
+          nh3: undefined,
+          turbidity: undefined,
+          measuredAt: undefined,
+        }));
+      }
 
       // 2. Cập nhật Camera FIS & Stale Check
       setLatestFis(fis);
-      if (fis.status) {
+      if (fis && fis.hasData && fis.status) {
         const cleanPct = Math.max(0, Math.min(100, Math.round(100 - fis.status.remainingFeedPercent)));
         setTrayCleanPercent(cleanPct);
         setFisAppetiteLevelState(fis.status.appetiteLevel);
@@ -352,6 +249,9 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
         } else {
           setAppetiteLevelState('strong');
         }
+      } else {
+        setTrayCleanPercent(0);
+        setFisAppetiteLevelState(0);
       }
 
       // 3. Cập nhật Khuyến nghị AI
@@ -365,6 +265,9 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
         if (feeder.metadata?.hopperCapacityKg && typeof feeder.metadata.hopperCapacityKg === 'number') {
           setHopperKg(Math.min(150, feeder.metadata.hopperCapacityKg));
         }
+      } else {
+        setIsEmergencyStopped(false);
+        setHopperKg(0);
       }
 
       // 5. Cập nhật Lịch ăn & Nhật ký cho ăn
@@ -391,45 +294,49 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
               ? 'ai_suggested'
               : 'pending',
             feedType: 'Cám số 2 hạt nổi (Grobest)',
-            targetKg: sch.feedAmountKg,
-            dispensedKg: matchingRecord ? matchingRecord.actualAmountKg : isDone ? sch.feedAmountKg : 0,
-            speedKgPerMin: sch.spreadRateKgPerMinute,
-            aiSuggestedKg: isAiSlot && aiRec ? aiRec.predictedFeedAmountKg : undefined,
+            targetKg: Number(sch.feedAmountKg) || 0,
+            dispensedKg: matchingRecord
+              ? Number(matchingRecord.actualAmountKg) || 0
+              : isDone
+              ? Number(sch.feedAmountKg) || 0
+              : 0,
+            speedKgPerMin: sch.spreadRateKgPerMinute !== undefined ? Number(sch.spreadRateKgPerMinute) || 0 : undefined,
+            aiSuggestedKg: isAiSlot && aiRec ? Number(aiRec.predictedFeedAmountKg) || 0 : undefined,
             notes: matchingRecord?.safetyReason || (sch.isEnabled ? 'Lịch tự động đang bật' : 'Tạm ngưng'),
           };
         });
         setFeedMeals(mappedMeals);
-      } else if (aiRec) {
-        // Cập nhật gợi ý AI thực tế vào cữ chiều
-        setFeedMeals((prev) =>
-          prev.map((m) =>
-            m.id === 'meal-3'
-              ? {
-                  ...m,
-                  aiSuggestedKg: aiRec.predictedFeedAmountKg,
-                  notes: aiRec.explanation,
-                }
-              : m
-          )
-        );
+      } else {
+        setFeedMeals([]);
       }
 
       const activeRec = records.find((r) => r.status === 'running') || records[0];
       if (activeRec) {
-        setDispensedKg(activeRec.actualAmountKg);
-        setTargetKg(activeRec.requestedAmountKg);
+        setDispensedKg(Number(activeRec.actualAmountKg) || 0);
+        setTargetKg(Number(activeRec.requestedAmountKg) || 0);
+      } else {
+        setDispensedKg(0);
+        setTargetKg(0);
       }
 
-      // 6. Đánh giá trước Safety Rule với mức 15kg mặc định
-      const safetyEval = await pondService.evaluateSafetyBeforeFeed(
-        pondId,
-        {
-          deviceId: feeder?.id || '22fffa98-46eb-4606-93a0-faae9f70691e',
-          requestedAmountKg: 15.0,
-        },
-        telemetry
-      );
-      setLastSafetyEvaluation(safetyEval);
+      // 6. Đánh giá trước Safety Rule nếu có chỉ số nước và thiết bị
+      if (telemetry && feeder) {
+        try {
+          const safetyEval = await pondService.evaluateSafetyBeforeFeed(
+            pondId,
+            {
+              deviceId: feeder.id,
+              requestedAmountKg: 15.0,
+            },
+            telemetry
+          );
+          setLastSafetyEvaluation(safetyEval);
+        } catch {
+          setLastSafetyEvaluation(null);
+        }
+      } else {
+        setLastSafetyEvaluation(null);
+      }
 
       // 7. Cảnh báo
       setAlerts(pondAlerts);
@@ -450,43 +357,6 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
       setSelectedPond(null);
       setIsLoadingFarms(false);
       setIsLoadingPonds(false);
-      return;
-    }
-
-    if (isOfflineMode) {
-      const offlineFarm: Farm = {
-        id: 'farm-offline-1',
-        ownerId: user?.id || 'usr_offline',
-        name: 'Trại Tôm Bờ Ao Ngoại Tuyến',
-        address: 'Khu vực mất sóng viễn thông',
-        status: 'active',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      const offlinePond: Pond = {
-        id: 'pond-offline-1',
-        farmId: 'farm-offline-1',
-        code: 'AO-OFFLINE',
-        name: 'Ao Ngoại Tuyến (Bộ nhớ đệm)',
-        areaM2: 2500,
-        status: 'active',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      setFarms([offlineFarm]);
-      setSelectedFarm(offlineFarm);
-      setPonds([offlinePond]);
-      setSelectedPond(offlinePond);
-      setFarmInfo((prev) => ({
-        ...prev,
-        farmerName: user?.fullName || prev.farmerName,
-        farmName: offlineFarm.name,
-        location: offlineFarm.address || prev.location,
-        selectedPond: offlinePond.name,
-      }));
-      setIsLoadingFarms(false);
-      setIsLoadingPonds(false);
-      await loadPondOperationalData(offlinePond.id);
       return;
     }
 
@@ -571,7 +441,7 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoadingFarms(false);
     }
-  }, [isAuthenticated, isOfflineMode, user, loadPondOperationalData]);
+  }, [isAuthenticated, user?.id, loadPondOperationalData]);
 
   useEffect(() => {
     loadFarmsAndPonds();

@@ -31,7 +31,6 @@ export default function ScreenLogin() {
     verifyResetOtp,
     resendOtp,
     resetPassword,
-    loginOffline,
     isLoading,
   } = useAuth();
 
@@ -108,15 +107,13 @@ export default function ScreenLogin() {
       if (err?.isForbiddenManager || err?.forbiddenRole === 'manager') {
         setForbiddenRole('manager');
         setForbiddenMsg(
-          err?.message ||
-          'Tài khoản Quản lý đầm (Manager) vui lòng đăng nhập trên hệ thống Manager Web App để cấu hình ao và phân công nhân sự.'
+          'Tài khoản Quản lý trang trại vui lòng đăng nhập trên hệ thống Quản lý Web để quản lý trang trại và phân công ao nuôi.'
         );
         setShowForbiddenModal(true);
       } else if (err?.isForbiddenAdmin || err?.forbiddenRole === 'admin' || err?.statusCode === 403) {
         setForbiddenRole('admin');
         setForbiddenMsg(
-          err?.message ||
-          'Tài khoản Quản trị viên (Admin) không được phép truy cập ứng dụng di động ShrimpMate Mobile. Vui lòng đăng nhập trên hệ thống Admin Web Dashboard.'
+          'Tài khoản Quản trị viên không được phép truy cập ứng dụng di động. Vui lòng đăng nhập trên hệ thống Quản trị Web.'
         );
         setShowForbiddenModal(true);
       } else {
@@ -160,44 +157,6 @@ export default function ScreenLogin() {
     } finally {
       setIsFirstPasswordSubmitting(false);
     }
-  };
-
-  // Offline Mode Login
-  const handleEnterOffline = async () => {
-    Alert.alert(
-      'Chế Độ Bờ Ao Ngoại Tuyến',
-      'Bạn đang truy cập ứng dụng không cần kết nối mạng. Dữ liệu các đầm tôm và lịch cữ sẽ được đồng bộ khi có sóng trở lại.',
-      [
-        { text: 'Hủy', style: 'cancel' },
-        {
-          text: 'Vào Xem Ngoại Tuyến',
-          style: 'default',
-          onPress: async () => {
-            await loginOffline();
-            router.replace('/(tabs)');
-          },
-        },
-      ]
-    );
-  };
-
-  // Hotline Support Dialog
-  const handleCallHotline = () => {
-    Alert.alert(
-      'Hotline Kỹ Sư Trại Nuôi 24/7',
-      'Đang kết nối tổng đài hỗ trợ kỹ thuật và chuẩn đoán hồ ao ShrimpMate: 1800 6868 (Miễn hoàn toàn cước gọi)',
-      [
-        { text: 'Hủy', style: 'cancel' },
-        {
-          text: 'Gọi 1800 6868',
-          onPress: () => {
-            Linking.openURL('tel:18006868').catch(() => {
-              Alert.alert('Thông Báo', 'Không thể tự động quay số trên thiết bị này. Vui lòng gọi 1800 6868.');
-            });
-          },
-        },
-      ]
-    );
   };
 
   // Forgot Password: Step 1 - Send OTP
@@ -318,71 +277,13 @@ export default function ScreenLogin() {
           <View style={[styles.brandHeader, { borderBottomColor: colors.outlineVariant + '30' }]}>
             <View style={styles.brandLeft}>
               <View style={[styles.logoBox, { backgroundColor: '#EA580C' }]}>
-                <MaterialIcons name="water-drop" size={26} color="#FFFFFF" />
+                <MaterialIcons name="waves" size={26} color="#FFFFFF" />
               </View>
-              <View>
-                <View style={styles.titleRow}>
-                  <Text style={[styles.brandName, { color: colors.onSurface }]}>ShrimpMate</Text>
-                  <View style={[styles.verBadge, { backgroundColor: '#FFDBCA' }]}>
-                    <Text style={[styles.verText, { color: '#9D4300' }]}>v2.4</Text>
-                  </View>
-                </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.brandName, { color: colors.onSurface }]}>ShrimpMate</Text>
                 <Text style={[styles.brandSub, { color: '#F97316' }]}>
-                  Trợ lý số nuôi tôm công nghệ cao
+                  Hệ Sinh Thái Nuôi Tôm Thông Minh
                 </Text>
-              </View>
-            </View>
-
-            <View
-              style={[
-                styles.signalBadge,
-                { backgroundColor: colors.surfaceContainerLowest, borderColor: colors.secondaryContainer },
-              ]}>
-              <View style={[styles.signalDot, { backgroundColor: colors.secondary }]} />
-              <MaterialIcons name="wifi" size={14} color={colors.secondary} />
-              <Text style={[styles.signalText, { color: colors.onSurface }]}>Máy Chủ Online</Text>
-            </View>
-          </View>
-
-          {/* Greeting Card */}
-          <View
-            style={[
-              styles.greetingCard,
-              {
-                backgroundColor: colors.surfaceContainerLowest,
-                borderColor: colors.outlineVariant + '40',
-              },
-            ]}>
-            <View style={styles.greetingHeader}>
-              <View style={[styles.avatarWrapper, { borderColor: '#F97316' }]}>
-                <MaterialIcons name="agriculture" size={32} color="#EA580C" />
-              </View>
-              <View style={styles.greetingInfo}>
-                <Text style={[styles.greetingTitle, { color: colors.onSurface }]}>
-                  Kính chào bà con!
-                </Text>
-                <Text style={[styles.greetingSub, { color: colors.onSurfaceVariant }]}>
-                  Đăng nhập để quản lý ao nuôi và điều khiển máy cho ăn
-                </Text>
-              </View>
-            </View>
-
-            <View
-              style={[
-                styles.badgesRow,
-                {
-                  backgroundColor: colors.surfaceContainerLow,
-                  borderColor: colors.outlineVariant + '40',
-                },
-              ]}>
-              <View style={styles.badgeItem}>
-                <MaterialIcons name="verified-user" size={16} color="#006E2D" />
-                <Text style={[styles.badgeText, { color: colors.onSurface }]}>Chuẩn VietGAP</Text>
-              </View>
-              <Text style={{ color: colors.outlineVariant }}>|</Text>
-              <View style={styles.badgeItem}>
-                <MaterialIcons name="security" size={16} color="#9D4300" />
-                <Text style={[styles.badgeText, { color: colors.onSurface }]}>Bảo mật Token JWT</Text>
               </View>
             </View>
           </View>
@@ -503,7 +404,7 @@ export default function ScreenLogin() {
               ) : (
                 <>
                   <MaterialIcons name="login" size={22} color="#FFFFFF" />
-                  <Text style={styles.btnLoginText}>VÀO VUÔNG TÔM</Text>
+                  <Text style={styles.btnLoginText}>ĐĂNG NHẬP</Text>
                 </>
               )}
             </Pressable>
@@ -511,79 +412,15 @@ export default function ScreenLogin() {
             {/* Register Link Row */}
             <View style={styles.registerPromptRow}>
               <Text style={[styles.registerPromptText, { color: colors.onSurfaceVariant }]}>
-                Chưa có tài khoản kỹ sư?
+                Chưa có tài khoản?
               </Text>
               <Pressable
                 onPress={() => router.push('/(auth)/register')}
                 style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1, padding: 2 }]}>
-                <Text style={styles.registerLinkText}>Đăng ký ngay</Text>
+                <Text style={styles.registerLinkText}>Xem hướng dẫn cấp tài khoản</Text>
               </Pressable>
             </View>
           </View>
-
-          {/* Offline Mode Option */}
-          <Pressable
-            onPress={handleEnterOffline}
-            style={({ pressed }) => [
-              styles.offlineCard,
-              {
-                backgroundColor: colors.surfaceContainerLowest,
-                borderColor: colors.outlineVariant + '40',
-                opacity: pressed ? 0.9 : 1,
-              },
-            ]}>
-            <View style={[styles.offlineIconBox, { backgroundColor: colors.surfaceContainerHigh }]}>
-              <MaterialIcons name="signal-wifi-off" size={20} color={colors.onSurface} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.offlineTitle, { color: colors.onSurface }]}>
-                Bờ ao mất sóng
-              </Text>
-              <Text style={[styles.offlineSub, { color: colors.onSurfaceVariant }]}>
-                Chế độ xem dữ liệu ngoại tuyến (Offline)
-              </Text>
-            </View>
-            <MaterialIcons name="arrow-forward-ios" size={14} color={colors.outlineVariant} />
-          </Pressable>
-
-          {/* Hotline Engineer 24/7 */}
-          <View
-            style={[
-              styles.hotlineBanner,
-              {
-                backgroundColor: colors.inverseSurface,
-                borderColor: colors.outlineVariant + '50',
-              },
-            ]}>
-            <View style={{ flex: 1, paddingRight: 8 }}>
-              <View style={styles.hotlineBadge}>
-                <View style={[styles.signalDot, { backgroundColor: colors.secondaryFixed }]} />
-                <Text style={[styles.hotlineTag, { color: colors.inverseOnSurface }]}>
-                  KỸ SƯ TRỰC MÁY 24/7
-                </Text>
-              </View>
-              <Text style={[styles.hotlineTitle, { color: colors.inverseOnSurface }]}>
-                Cần hỗ trợ tài khoản hoặc thiết bị ao?
-              </Text>
-              <Text style={[styles.hotlineSub, { color: colors.primaryFixed }]}>
-                Bà con gọi miễn hoàn toàn cước phí
-              </Text>
-            </View>
-
-            <Pressable
-              onPress={handleCallHotline}
-              style={({ pressed }) => [
-                styles.hotlineCallBtn,
-                { backgroundColor: colors.secondaryFixed, opacity: pressed ? 0.9 : 1 },
-              ]}>
-              <MaterialIcons name="call" size={18} color={colors.onSecondaryFixed} />
-              <Text style={[styles.hotlineCallNum, { color: colors.onSecondaryFixed }]}>1800 6868</Text>
-            </Pressable>
-          </View>
-
-          <Text style={[styles.footerText, { color: colors.onSurfaceVariant }]}>
-            An toàn sinh học & Bảo mật hồ sơ nuôi tôm chuẩn VietGAP
-          </Text>
         </View>
       </ScrollView>
 
@@ -627,8 +464,8 @@ export default function ScreenLogin() {
                   letterSpacing: -0.2,
                 }}>
                 {forbiddenRole === 'manager'
-                  ? 'TÀI KHOẢN QUẢN LÝ ĐẦM (MANAGER)'
-                  : 'TÀI KHOẢN QUẢN TRỊ VIÊN (ADMIN)'}
+                  ? 'TÀI KHOẢN QUẢN LÝ TRANG TRẠI'
+                  : 'TÀI KHOẢN QUẢN TRỊ VIÊN'}
               </Text>
               <Text
                 style={{
@@ -637,10 +474,9 @@ export default function ScreenLogin() {
                   lineHeight: 20,
                   textAlign: 'center',
                 }}>
-                {forbiddenMsg ||
-                  (forbiddenRole === 'manager'
-                    ? 'Ứng dụng di động ShrimpMate Mobile chỉ dành riêng cho Người nuôi (Farmer). Tài khoản Quản lý đầm (Manager) vui lòng sử dụng Manager Web App để quản trị trang trại và phân công nhân sự.'
-                    : 'Ứng dụng di động ShrimpMate Mobile chỉ dành riêng cho Người nuôi (Farmer). Tài khoản Quản trị viên không được phép đăng nhập trên thiết bị di động.')}
+                {forbiddenRole === 'manager'
+                  ? 'Ứng dụng di động ShrimpMate chỉ dành riêng cho Người nuôi. Tài khoản Quản lý trang trại vui lòng đăng nhập trên hệ thống Quản lý Web để điều hành trang trại và phân công ao nuôi.'
+                  : 'Ứng dụng di động ShrimpMate chỉ dành riêng cho Người nuôi. Tài khoản Quản trị viên không được phép đăng nhập trên thiết bị di động.'}
               </Text>
               <View
                 style={{
@@ -655,15 +491,13 @@ export default function ScreenLogin() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <MaterialIcons name="info" size={16} color="#0058BE" />
                   <Text style={{ fontSize: 12, fontWeight: '800', color: '#0058BE' }}>
-                    {forbiddenRole === 'manager'
-                      ? 'Hướng dẫn truy cập Manager Web App:'
-                      : 'Hướng dẫn truy cập Admin Web Dashboard:'}
+                    Hướng dẫn truy cập máy tính:
                   </Text>
                 </View>
                 <Text style={{ fontSize: 12, color: '#2B4865', lineHeight: 18 }}>
                   {forbiddenRole === 'manager'
-                    ? 'Vui lòng truy cập trên máy tính hoặc trình duyệt web tới cổng Quản lý Trang trại (Manager Web App) để quản lý danh sách ao nuôi, xem camera AI và phân công bờ ao cho kỹ thuật viên.'
-                    : 'Vui lòng đăng nhập trên máy tính bằng trình duyệt web tới hệ thống Quản trị Web (Admin Web Dashboard) để quản lý cấu hình ao nuôi và thiết bị toàn hệ thống.'}
+                    ? 'Vui lòng mở trình duyệt web trên máy tính và đăng nhập vào hệ thống Quản lý Trang trại để quản lý danh sách ao nuôi, xem báo cáo và phân công bờ ao cho Người nuôi.'
+                    : 'Vui lòng mở trình duyệt web trên máy tính và đăng nhập vào hệ thống Quản trị Web để quản lý cấu hình hệ thống và thiết bị.'}
                 </Text>
               </View>
             </View>

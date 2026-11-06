@@ -97,7 +97,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await authService.logout();
         setUser(null);
         const forbiddenError = new Error(
-          'Tài khoản Quản trị viên (Admin) không được phép truy cập ứng dụng di động. Vui lòng sử dụng Admin Web Dashboard.'
+          'Tài khoản Quản trị viên không được phép truy cập ứng dụng di động. Vui lòng đăng nhập trên hệ thống Quản trị Web.'
         );
         (forbiddenError as any).statusCode = 403;
         (forbiddenError as any).forbiddenRole = 'admin';
@@ -109,7 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await authService.logout();
         setUser(null);
         const forbiddenError = new Error(
-          'Tài khoản Quản lý đầm (Manager) vui lòng đăng nhập trên hệ thống Web Manager để cấu hình ao và phân công nhân sự.'
+          'Tài khoản Quản lý trang trại vui lòng đăng nhập trên hệ thống Quản lý Web để cấu hình ao và phân công nhân sự.'
         );
         (forbiddenError as any).statusCode = 403;
         (forbiddenError as any).forbiddenRole = 'manager';
@@ -130,8 +130,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const forbiddenError = new Error(
           checkErr?.message ||
           (isManager
-            ? 'Tài khoản Quản lý đầm (Manager) vui lòng đăng nhập trên hệ thống Web Manager để quản lý ao nuôi và phân công công nhân.'
-            : 'Tài khoản Quản trị viên (Admin) không được phép truy cập ứng dụng di động. Vui lòng sử dụng Web Dashboard.')
+            ? 'Tài khoản Quản lý trang trại vui lòng đăng nhập trên hệ thống Quản lý Web để quản lý trang trại và phân công ao nuôi.'
+            : 'Tài khoản Quản trị viên không được phép truy cập ứng dụng di động. Vui lòng đăng nhập trên hệ thống Quản trị Web.')
         );
         (forbiddenError as any).statusCode = 403;
         (forbiddenError as any).forbiddenRole = isManager ? 'manager' : 'admin';

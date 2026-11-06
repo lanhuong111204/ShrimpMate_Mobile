@@ -39,7 +39,7 @@ export default function TabLayout() {
             <MaterialIcons
               name="menu-book"
               size={24}
-              color={focused ? '#F97316' : color}
+              color={focused ? '#F97316' : typeof color === 'string' ? color : '#687076'}
               style={focused ? { transform: [{ scale: 1.1 }] } : {}}
             />
           ),
@@ -53,7 +53,7 @@ export default function TabLayout() {
             <MaterialIcons
               name="radar"
               size={24}
-              color={focused ? '#F97316' : color}
+              color={focused ? '#F97316' : typeof color === 'string' ? color : '#687076'}
               style={focused ? { transform: [{ scale: 1.1 }] } : {}}
             />
           ),
@@ -67,7 +67,7 @@ export default function TabLayout() {
             <MaterialIcons
               name="waves"
               size={24}
-              color={focused ? '#F97316' : color}
+              color={focused ? '#F97316' : typeof color === 'string' ? color : '#687076'}
               style={focused ? { transform: [{ scale: 1.1 }] } : {}}
             />
           ),
@@ -81,7 +81,7 @@ export default function TabLayout() {
             <MaterialIcons
               name="settings"
               size={24}
-              color={focused ? '#F97316' : color}
+              color={focused ? '#F97316' : typeof color === 'string' ? color : '#687076'}
               style={focused ? { transform: [{ scale: 1.1 }] } : {}}
             />
           ),

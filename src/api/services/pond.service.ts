@@ -51,70 +51,40 @@ export function evaluateWaterMetricStatus(
   }
 }
 
-export const INITIAL_MOCK_PONDS: Pond[] = [
-  {
-    id: 'pond-1',
-    name: 'Ao số 1 (Ao nuôi chính)',
-    code: 'AO-01',
-    areaM2: 3000,
-    depthM: 1.6,
-    shrimpCount: 200000,
-    shrimpAgeDays: 45,
-    species: 'Tôm thẻ chân trắng (Vannamei)',
-    status: 'active',
-    createdAt: '2026-09-01T00:00:00.000Z',
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'pond-2',
-    name: 'Ao số 2 (Ao giống)',
-    code: 'AO-02',
-    areaM2: 1500,
-    depthM: 1.4,
-    shrimpCount: 220000,
-    shrimpAgeDays: 20,
-    species: 'Tôm thẻ chân trắng (Vannamei)',
-    status: 'active',
-    createdAt: '2026-09-20T00:00:00.000Z',
-    updatedAt: new Date().toISOString(),
-  },
-];
-
-let pondsState = [...INITIAL_MOCK_PONDS];
-
 export const pondService = {
   /**
    * 10.1. Lấy chỉ số môi trường nước mới nhất (6 Gauges: pH, DO, Nhiệt độ, Độ mặn, NH3, Độ đục)
    * Endpoint: GET /ponds/:pondId/telemetry/latest
    */
-  async getLatestTelemetry(pondId: string): Promise<TelemetryReading> {
+  async getLatestTelemetry(pondId: string): Promise<TelemetryReading | null> {
+    const normalizeTelemetry = (raw: any): TelemetryReading | null => {
+      if (!raw || typeof raw !== 'object') return null;
+      const item = raw.data && typeof raw.data === 'object' ? raw.data : raw;
+      if (item.ph === undefined || item.ph === null || isNaN(Number(item.ph))) return null;
+      return {
+        ...item,
+        ph: Number(item.ph),
+        dissolvedOxygenMgL: Number(item.dissolvedOxygenMgL ?? item.do ?? 0),
+        temperatureC: Number(item.temperatureC ?? item.temperature ?? 0),
+        salinityPpt: Number(item.salinityPpt ?? item.salinity ?? 0),
+        ammoniaMgL: Number(item.ammoniaMgL ?? item.nh3 ?? 0),
+        turbidityNtu: Number(item.turbidityNtu ?? item.turbidity ?? 0),
+      };
+    };
+
     try {
-      const response = await apiClient.get<TelemetryReading>(Endpoints.telemetry.latest(pondId));
-      const data = response.data;
-      if (data && typeof data.ph === 'number') {
-        await Storage.setJSON(`${AppConfig.storageKeys.cachedTelemetry}_${pondId}`, data);
-        return data;
+      const response = await apiClient.get<any>(Endpoints.telemetry.latest(pondId));
+      const normalized = normalizeTelemetry(response.data);
+      if (normalized) {
+        await Storage.setJSON(`${AppConfig.storageKeys.cachedTelemetry}_${pondId}`, normalized);
+        return normalized;
       }
-      throw new Error('Empty telemetry response');
+      return null;
     } catch {
-      const cached = await Storage.getJSON<TelemetryReading>(
+      const cached = await Storage.getJSON<any>(
         `${AppConfig.storageKeys.cachedTelemetry}_${pondId}`
       );
-      if (cached) return cached;
-
-      // Fallback dữ liệu chuẩn 6 chỉ số khi ngoại tuyến chưa có cache
-      return {
-        id: `tel-fallback-${pondId}`,
-        pondId,
-        deviceId: 'ESP32_SENSOR_01',
-        measuredAt: new Date().toISOString(),
-        ph: 7.85,
-        dissolvedOxygenMgL: 5.4,
-        temperatureC: 28.5,
-        salinityPpt: 15.2,
-        ammoniaMgL: 0.02,
-        turbidityNtu: 22.0,
-      };
+      return normalizeTelemetry(cached);
     }
   },
 
@@ -141,54 +111,55 @@ export const pondService = {
    * Kiểm tra cờ isStale hoặc ageSeconds > 120s
    */
   async getLatestFis(pondId: string): Promise<LatestFisResponse> {
-    try {
-      const response = await apiClient.get<LatestFisResponse>(Endpoints.camera.latestFis(pondId));
-      const data = response.data;
-      if (data && typeof data.hasData === 'boolean') {
-        // Đảm bảo tính nhất quán của cờ isStale nếu ageSeconds > 120
-        if (data.status && typeof data.status.ageSeconds === 'number' && data.status.ageSeconds > 120) {
+    const normalizeFis = (raw: any): LatestFisResponse | null => {
+      if (!raw || typeof raw !== 'object') return null;
+      const data = raw.data && typeof raw.data === 'object' && 'hasData' in raw.data ? raw.data : raw;
+      if (typeof data.hasData !== 'boolean') return null;
+      if (data.status) {
+        data.status = {
+          ...data.status,
+          fisScore: Number(data.status.fisScore) || 0,
+          appetiteLevel: (Number(data.status.appetiteLevel) || 0) as any,
+          remainingFeedPercent: Number(data.status.remainingFeedPercent) || 0,
+          shrimpDensity: Number(data.status.shrimpDensity) || 0,
+          consumptionVelocity: Number(data.status.consumptionVelocity) || 0,
+          ageSeconds: Number(data.status.ageSeconds) || 0,
+        };
+        if (data.status.ageSeconds > 120) {
           data.status.isStale = true;
         }
-        await Storage.setJSON(`${AppConfig.storageKeys.cachedFis}_${pondId}`, data);
-        return data;
       }
-      throw new Error('Invalid FIS response');
+      return data as LatestFisResponse;
+    };
+
+    try {
+      const response = await apiClient.get<any>(Endpoints.camera.latestFis(pondId));
+      const normalized = normalizeFis(response.data);
+      if (normalized) {
+        await Storage.setJSON(`${AppConfig.storageKeys.cachedFis}_${pondId}`, normalized);
+        return normalized;
+      }
+      return { hasData: false, pondId };
     } catch {
-      const cached = await Storage.getJSON<LatestFisResponse>(
+      const cached = await Storage.getJSON<any>(
         `${AppConfig.storageKeys.cachedFis}_${pondId}`
       );
-      if (cached) {
-        if (cached.status?.timestamp) {
+      const normalized = normalizeFis(cached);
+      if (normalized) {
+        if (normalized.status?.timestamp) {
           const ageSec = Math.max(
             0,
-            Math.floor((Date.now() - new Date(cached.status.timestamp).getTime()) / 1000)
+            Math.floor((Date.now() - new Date(normalized.status.timestamp).getTime()) / 1000)
           );
-          cached.status.ageSeconds = ageSec;
-          cached.status.isStale = ageSec > 120;
+          normalized.status.ageSeconds = ageSec;
+          normalized.status.isStale = ageSec > 120;
         }
-        return cached;
+        return normalized;
       }
 
       return {
-        hasData: true,
+        hasData: false,
         pondId,
-        status: {
-          fisScore: 0.785,
-          appetiteLevel: 3,
-          appetiteLevelDescription: 'Ăn mạnh (Mức 3)',
-          remainingFeedPercent: 8.0,
-          shrimpDensity: 18.5,
-          consumptionVelocity: 0.015,
-          timestamp: new Date(Date.now() - 25 * 1000).toISOString(),
-          ageSeconds: 25,
-          isStale: false,
-        },
-        camera: {
-          id: 'cam-01',
-          name: 'Camera quan sát sàng ăn Ao 1',
-          status: 'online',
-          lastSeenAt: new Date().toISOString(),
-        },
       };
     }
   },
@@ -205,14 +176,16 @@ export const pondService = {
       hasData: true,
       pondId: payload.pondId,
       status: {
-        fisScore: summary?.fisScore ?? log?.fisScore ?? 0.82,
-        appetiteLevel: summary?.appetiteLevel ?? log?.appetiteLevel ?? 3,
-        appetiteLevelDescription: summary?.appetiteLevelDescription ?? 'Ăn mạnh (Mức 3)',
+        fisScore: Number(summary?.fisScore ?? log?.fisScore ?? 0) || 0,
+        appetiteLevel: (Number(summary?.appetiteLevel ?? log?.appetiteLevel ?? 0) || 0) as any,
+        appetiteLevelDescription: summary?.appetiteLevelDescription ?? 'Chưa xác định',
         remainingFeedPercent:
-          summary?.feedLeftoverPercent ??
-          (typeof log?.remainingFeedAreaRt === 'number' ? Math.round(log.remainingFeedAreaRt * 100) : 6.0),
-        shrimpDensity: summary?.shrimpDensity ?? log?.shrimpDensityDt ?? 19.2,
-        consumptionVelocity: summary?.consumptionVelocity ?? log?.feedConsumptionVelocityVt ?? 0.016,
+          Number(
+            summary?.feedLeftoverPercent ??
+              (log?.remainingFeedAreaRt !== undefined ? Math.round(Number(log.remainingFeedAreaRt) * 100) : 0)
+          ) || 0,
+        shrimpDensity: Number(summary?.shrimpDensity ?? log?.shrimpDensityDt ?? 0) || 0,
+        consumptionVelocity: Number(summary?.consumptionVelocity ?? log?.feedConsumptionVelocityVt ?? 0) || 0,
         timestamp: log?.timestamp || new Date().toISOString(),
         ageSeconds: 1,
         isStale: false,
@@ -227,49 +200,54 @@ export const pondService = {
    * Endpoint: GET /ponds/:pondId/ai/recommendations/latest
    */
   async getLatestAiRecommendation(pondId: string): Promise<AiRecommendation | null> {
+    const normalizeAi = (raw: any): AiRecommendation | null => {
+      if (!raw || typeof raw !== 'object') return null;
+      const item = raw.data && typeof raw.data === 'object' ? raw.data : raw;
+      if (
+        item.predictedFeedAmountKg === undefined ||
+        item.predictedFeedAmountKg === null ||
+        isNaN(Number(item.predictedFeedAmountKg))
+      ) {
+        return null;
+      }
+      return {
+        ...item,
+        predictedFeedAmountKg: Number(item.predictedFeedAmountKg),
+        spreadRateKgPerMinute:
+          item.spreadRateKgPerMinute !== undefined ? Number(item.spreadRateKgPerMinute) : undefined,
+        biomassKg: item.biomassKg !== undefined ? Number(item.biomassKg) : undefined,
+        confidence: item.confidence !== undefined ? Number(item.confidence) : undefined,
+      };
+    };
+
     try {
-      const response = await apiClient.get<AiRecommendation>(
+      const response = await apiClient.get<any>(
         Endpoints.ai.recommendationsLatest(pondId)
       );
-      if (response.data && typeof response.data.predictedFeedAmountKg === 'number') {
-        await Storage.setJSON(`${AppConfig.storageKeys.cachedAiRec}_${pondId}`, response.data);
-        return response.data;
+      const normalized = normalizeAi(response.data);
+      if (normalized) {
+        await Storage.setJSON(`${AppConfig.storageKeys.cachedAiRec}_${pondId}`, normalized);
+        return normalized;
       }
       return null;
     } catch {
       try {
         // Fallback thử đường dẫn tương thích tài liệu 1 nếu cần
-        const alt = await apiClient.get<AiRecommendation>(
+        const alt = await apiClient.get<any>(
           Endpoints.ai.legacyRecommendations(pondId)
         );
-        if (alt.data && typeof alt.data.predictedFeedAmountKg === 'number') {
-          await Storage.setJSON(`${AppConfig.storageKeys.cachedAiRec}_${pondId}`, alt.data);
-          return alt.data;
+        const normalizedAlt = normalizeAi(alt.data);
+        if (normalizedAlt) {
+          await Storage.setJSON(`${AppConfig.storageKeys.cachedAiRec}_${pondId}`, normalizedAlt);
+          return normalizedAlt;
         }
       } catch {
         // Ignore
       }
-      const cached = await Storage.getJSON<AiRecommendation>(
+      const cached = await Storage.getJSON<any>(
         `${AppConfig.storageKeys.cachedAiRec}_${pondId}`
       );
-      if (cached) return cached;
-
-      return {
-        id: `ai-rec-${pondId}`,
-        pondId,
-        modelName: 'ShrimpMate-FeedOpt-v2',
-        modelVersion: '2.1.0',
-        predictedFeedAmountKg: 22.0,
-        spreadRateKgPerMinute: 1.5,
-        appetiteLevel: 3,
-        biomassKg: 780.0,
-        anomalyScore: 0.04,
-        confidence: 0.94,
-        safetyDecision: 'allowed',
-        safetyReason: null,
-        explanation:
-          'Tôm bắt mồi mạnh (FIS=0.79, Mức 3), DO=5.4 mg/L và nhiệt độ 28.5°C nằm trong ngưỡng tối ưu. Khuyến nghị cữ hiện tại 22.0 kg.',
-      };
+      return normalizeAi(cached);
     }
   },
 
@@ -294,31 +272,7 @@ export const pondService = {
       const cached = await Storage.getJSON<Device[]>(
         `${AppConfig.storageKeys.cachedDevices}_${pondId}`
       );
-      if (cached && cached.length > 0) return cached;
-      return [
-        {
-          id: '22fffa98-46eb-4606-93a0-faae9f70691e',
-          pondId,
-          deviceUid: 'ESP32_FEEDER_01',
-          name: 'Máy cho ăn tự động A1',
-          type: 'feeder',
-          status: 'online',
-          mode: 'automatic',
-          firmwareVersion: '1.2.0',
-          lastSeenAt: new Date().toISOString(),
-          metadata: { hopperCapacityKg: 150 },
-        },
-        {
-          id: 'cam-device-01',
-          pondId,
-          deviceUid: 'CAM-01-A1',
-          name: 'Camera giám sát sàng ăn Ao 1',
-          type: 'camera',
-          status: 'online',
-          firmwareVersion: '1.0.0',
-          lastSeenAt: new Date().toISOString(),
-        },
-      ];
+      return cached || [];
     }
   },
 
@@ -326,23 +280,32 @@ export const pondService = {
    * 9.1. Danh sách lịch cho ăn của ao (GET /ponds/:pondId/feeding-schedules)
    */
   async getFeedingSchedules(pondId: string): Promise<FeedingSchedule[]> {
+    const normalizeSchedules = (items: any[]): FeedingSchedule[] =>
+      items.map((sch) => ({
+        ...sch,
+        feedAmountKg: Number(sch.feedAmountKg) || 0,
+        spreadRateKgPerMinute:
+          sch.spreadRateKgPerMinute !== undefined ? Number(sch.spreadRateKgPerMinute) || 0 : 1.5,
+      }));
+
     try {
       const response = await apiClient.get<any>(Endpoints.feedings.schedules(pondId));
       const raw = response.data;
-      const list: FeedingSchedule[] = Array.isArray(raw)
+      const list: any[] = Array.isArray(raw)
         ? raw
         : raw && Array.isArray(raw.data)
         ? raw.data
         : [];
-      if (list.length > 0) {
-        await Storage.setJSON(`${AppConfig.storageKeys.cachedSchedules}_${pondId}`, list);
+      const normalized = normalizeSchedules(list);
+      if (normalized.length > 0) {
+        await Storage.setJSON(`${AppConfig.storageKeys.cachedSchedules}_${pondId}`, normalized);
       }
-      return list;
+      return normalized;
     } catch {
-      const cached = await Storage.getJSON<FeedingSchedule[]>(
+      const cached = await Storage.getJSON<any[]>(
         `${AppConfig.storageKeys.cachedSchedules}_${pondId}`
       );
-      return cached || [];
+      return Array.isArray(cached) ? normalizeSchedules(cached) : [];
     }
   },
 
@@ -350,23 +313,31 @@ export const pondService = {
    * 9.4. Lịch sử nhật ký các lần cho ăn (GET /ponds/:pondId/feeding-records)
    */
   async getFeedingRecords(pondId: string): Promise<FeedingRecord[]> {
+    const normalizeRecords = (items: any[]): FeedingRecord[] =>
+      items.map((rec) => ({
+        ...rec,
+        requestedAmountKg: Number(rec.requestedAmountKg) || 0,
+        actualAmountKg: Number(rec.actualAmountKg) || 0,
+      }));
+
     try {
       const response = await apiClient.get<any>(Endpoints.feedings.records(pondId));
       const raw = response.data;
-      const list: FeedingRecord[] = Array.isArray(raw)
+      const list: any[] = Array.isArray(raw)
         ? raw
         : raw && Array.isArray(raw.data)
         ? raw.data
         : [];
-      if (list.length > 0) {
-        await Storage.setJSON(`${AppConfig.storageKeys.cachedRecords}_${pondId}`, list);
+      const normalized = normalizeRecords(list);
+      if (normalized.length > 0) {
+        await Storage.setJSON(`${AppConfig.storageKeys.cachedRecords}_${pondId}`, normalized);
       }
-      return list;
+      return normalized;
     } catch {
-      const cached = await Storage.getJSON<FeedingRecord[]>(
+      const cached = await Storage.getJSON<any[]>(
         `${AppConfig.storageKeys.cachedRecords}_${pondId}`
       );
-      return cached || [];
+      return Array.isArray(cached) ? normalizeRecords(cached) : [];
     }
   },
 
@@ -390,11 +361,22 @@ export const pondService = {
       }
       throw new Error('Invalid safety evaluate response');
     } catch {
-      // Đánh giá an toàn cục bộ theo đúng ngưỡng sinh học khi mất sóng bờ ao
-      const doVal = fallbackTelemetry?.dissolvedOxygenMgL ?? 5.4;
-      const phVal = fallbackTelemetry?.ph ?? 7.85;
-      const nh3Val = fallbackTelemetry?.ammoniaMgL ?? 0.02;
-      const tempVal = fallbackTelemetry?.temperatureC ?? 28.5;
+      // Đánh giá an toàn cục bộ theo đúng ngưỡng sinh học khi có dữ liệu đo mới nhất trong cache
+      if (!fallbackTelemetry || typeof fallbackTelemetry.dissolvedOxygenMgL !== 'number') {
+        return {
+          decision: 'blocked',
+          allowedAmountKg: 0,
+          requestedAmountKg: payload.requestedAmountKg,
+          reasons: [
+            'Chưa có dữ liệu cảm biến môi trường nước cho ao này để đánh giá an toàn sinh học.',
+          ],
+          appliedRules: ['NO_TELEMETRY_DATA'],
+        };
+      }
+      const doVal = fallbackTelemetry.dissolvedOxygenMgL;
+      const phVal = fallbackTelemetry.ph;
+      const nh3Val = fallbackTelemetry.ammoniaMgL;
+      const tempVal = fallbackTelemetry.temperatureC;
 
       const reasons: string[] = [];
       const appliedRules: string[] = [];
@@ -537,18 +519,18 @@ export const pondService = {
   async getPonds(): Promise<Pond[]> {
     try {
       const response = await apiClient.get<Pond[]>(Endpoints.ponds.list);
-      return response.data;
+      return Array.isArray(response.data) ? response.data : [];
     } catch {
-      return pondsState;
+      return [];
     }
   },
 
   async getPondById(id: string): Promise<Pond | null> {
     try {
       const response = await apiClient.get<Pond>(Endpoints.ponds.detail(id));
-      return response.data;
+      return response.data || null;
     } catch {
-      return pondsState.find((p) => p.id === id) ?? null;
+      return null;
     }
   },
 

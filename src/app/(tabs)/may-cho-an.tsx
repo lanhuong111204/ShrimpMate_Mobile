@@ -52,6 +52,16 @@ export default function ScreenLiveFeeder() {
   const [safetyPreview, setSafetyPreview] = useState<EvaluateSafetyResponse | null>(null);
   const [isEvaluatingSafety, setIsEvaluatingSafety] = useState(false);
   const [isTriggeringFeed, setIsTriggeringFeed] = useState(false);
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+
+  const handlePullRefresh = async (refreshAction: () => Promise<void>) => {
+    setIsManualRefreshing(true);
+    try {
+      await refreshAction();
+    } finally {
+      setIsManualRefreshing(false);
+    }
+  };
 
   const hasAssignedPond = Boolean(selectedPond && ponds.length > 0);
 
@@ -79,8 +89,8 @@ export default function ScreenLiveFeeder() {
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
-              refreshing={isRefreshingPondData}
-              onRefresh={refreshFarmsAndPonds}
+              refreshing={isManualRefreshing}
+              onRefresh={() => handlePullRefresh(refreshFarmsAndPonds)}
               colors={['#EA580C']}
               tintColor="#EA580C"
             />
@@ -101,6 +111,8 @@ export default function ScreenLiveFeeder() {
     try {
       const res = await evaluateSafetyBeforeFeed(numKg);
       setSafetyPreview(res);
+    } catch {
+      setSafetyPreview(null);
     } finally {
       setIsEvaluatingSafety(false);
     }
@@ -114,6 +126,8 @@ export default function ScreenLiveFeeder() {
       try {
         const res = await evaluateSafetyBeforeFeed(numKg);
         setSafetyPreview(res);
+      } catch {
+        setSafetyPreview(null);
       } finally {
         setIsEvaluatingSafety(false);
       }
@@ -167,13 +181,18 @@ export default function ScreenLiveFeeder() {
     Alert.alert('Đang Phun Thử', 'Bắt đầu chu kỳ phun thử 10 giây kiểm tra góc văng cám...');
   };
 
-  const percent = targetKg > 0 ? Math.min(100, Math.round((dispensedKg / targetKg) * 100)) : 0;
-  const hopperPercent = Math.round((hopperKg / 150) * 100);
+  const safeDispensedKg = Number(dispensedKg) || 0;
+  const safeTargetKg = Number(targetKg) || 0;
+  const percent = safeTargetKg > 0 ? Math.min(100, Math.round((safeDispensedKg / safeTargetKg) * 100)) : 0;
+  const hopperPercent = Math.round(((Number(hopperKg) || 0) / 150) * 100);
 
   const currentDecision = safetyPreview?.decision || lastSafetyEvaluation?.decision || 'allowed';
   const isFeedBlocked = isEmergencyStopped || currentDecision === 'blocked';
-  const doVal = latestTelemetry?.dissolvedOxygenMgL ?? farmInfo.dissolvedOxygen;
-  const phVal = latestTelemetry?.ph ?? farmInfo.ph;
+  const hasTelemetry = Boolean(
+    latestTelemetry && latestTelemetry.ph !== undefined && latestTelemetry.ph !== null && !isNaN(Number(latestTelemetry.ph))
+  );
+  const doVal = hasTelemetry && latestTelemetry?.dissolvedOxygenMgL !== undefined ? Number(latestTelemetry.dissolvedOxygenMgL) : undefined;
+  const phVal = hasTelemetry && latestTelemetry?.ph !== undefined ? Number(latestTelemetry.ph) : undefined;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.surface }]}>
@@ -184,8 +203,8 @@ export default function ScreenLiveFeeder() {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={isRefreshingPondData}
-            onRefresh={refreshPondOperationalData}
+            refreshing={isManualRefreshing}
+            onRefresh={() => handlePullRefresh(refreshPondOperationalData)}
             colors={['#EA580C']}
             tintColor="#EA580C"
           />
@@ -200,12 +219,16 @@ export default function ScreenLiveFeeder() {
                   ? '#FFDAD6'
                   : currentDecision === 'adjusted'
                   ? '#FEF3C7'
-                  : '#E8F5E9',
+                  : hasTelemetry || lastSafetyEvaluation
+                  ? '#E8F5E9'
+                  : '#F1F5F9',
                 borderColor: isEmergencyStopped || currentDecision === 'blocked'
                   ? '#BA1A1A'
                   : currentDecision === 'adjusted'
                   ? '#F59E0B'
-                  : '#7CF994',
+                  : hasTelemetry || lastSafetyEvaluation
+                  ? '#7CF994'
+                  : '#CBD5E1',
               },
             ]}>
             <View style={styles.safetyHeader}>
@@ -215,7 +238,9 @@ export default function ScreenLiveFeeder() {
                     ? 'dangerous'
                     : currentDecision === 'adjusted'
                     ? 'warning-amber'
-                    : 'verified-user'
+                    : hasTelemetry || lastSafetyEvaluation
+                    ? 'verified-user'
+                    : 'sensors-off'
                 }
                 size={22}
                 color={
@@ -223,7 +248,9 @@ export default function ScreenLiveFeeder() {
                     ? '#BA1A1A'
                     : currentDecision === 'adjusted'
                     ? '#B45309'
-                    : '#006E2D'
+                    : hasTelemetry || lastSafetyEvaluation
+                    ? '#006E2D'
+                    : '#64748B'
                 }
               />
               <Text
@@ -235,7 +262,9 @@ export default function ScreenLiveFeeder() {
                         ? '#93000A'
                         : currentDecision === 'adjusted'
                         ? '#92400E'
-                        : '#006E2D',
+                        : hasTelemetry || lastSafetyEvaluation
+                        ? '#006E2D'
+                        : '#475569',
                   },
                 ]}>
                 {isEmergencyStopped
@@ -244,7 +273,9 @@ export default function ScreenLiveFeeder() {
                   ? 'SAFETY RULE ENGINE: KHÓA XẢ CÁM (BLOCKED)'
                   : currentDecision === 'adjusted'
                   ? 'SAFETY RULE ENGINE: ĐIỀU CHỈNH AN TOÀN (ADJUSTED)'
-                  : `SAFETY RULE ENGINE: AN TOÀN (${selectedPond?.code || 'AO-01'})`}
+                  : hasTelemetry || lastSafetyEvaluation
+                  ? `SAFETY RULE ENGINE: AN TOÀN (${selectedPond?.code || selectedPond?.name || 'Ao nuôi'})`
+                  : `SAFETY RULE ENGINE: CHƯA CÓ DỮ LIỆU ĐO (${selectedPond?.code || selectedPond?.name || 'Ao nuôi'})`}
               </Text>
             </View>
             <Text
@@ -256,13 +287,17 @@ export default function ScreenLiveFeeder() {
                       ? '#93000A'
                       : currentDecision === 'adjusted'
                       ? '#92400E'
-                      : '#005320',
+                      : hasTelemetry || lastSafetyEvaluation
+                      ? '#005320'
+                      : '#64748B',
                 },
               ]}>
               {isEmergencyStopped
-                ? `Đã ngắt động cơ máy cho ăn (${feederDevice?.deviceUid || 'ESP32_FEEDER_01'}) qua MQTT.`
+                ? `Đã ngắt động cơ máy cho ăn (${feederDevice?.deviceUid || 'Thiết bị máy ăn'}) qua MQTT.`
                 : lastSafetyEvaluation?.reasons?.[0] ||
-                  `✓ ${selectedPond?.name || farmInfo.selectedPond}: DO = ${doVal} mg/L, pH = ${phVal} • Đạt chuẩn xả cám an toàn.`}
+                  (hasTelemetry && doVal !== undefined && phVal !== undefined
+                    ? `✓ ${selectedPond?.name || 'Ao nuôi'}: DO = ${doVal} mg/L, pH = ${phVal} • Đạt chuẩn xả cám an toàn.`
+                    : `Chưa có dữ liệu đo từ cảm biến`)}
             </Text>
           </View>
 
@@ -298,7 +333,7 @@ export default function ScreenLiveFeeder() {
                 </Text>
               </View>
               <Text style={styles.gaugeSub}>
-                {feederDevice?.deviceUid || 'ESP32_FEEDER_01'} • MQTT
+                {feederDevice?.deviceUid || 'Chưa gắn thiết bị'} • MQTT
               </Text>
             </View>
 
@@ -327,9 +362,9 @@ export default function ScreenLiveFeeder() {
                     },
                   ]}>
                   <Text style={[styles.progressKgText, { color: colors.onSurface }]}>
-                    {dispensedKg.toFixed(1)}
+                    {safeDispensedKg.toFixed(1)}
                   </Text>
-                  <Text style={styles.progressTotalText}>/ {targetKg} kg</Text>
+                  <Text style={styles.progressTotalText}>/ {safeTargetKg} kg</Text>
                   <View style={[styles.percentBadge, { backgroundColor: '#FFDBCA' }]}>
                     <Text style={styles.percentBadgeText}>{percent}% ĐÃ RẢI</Text>
                   </View>

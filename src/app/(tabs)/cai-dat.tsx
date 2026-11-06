@@ -22,7 +22,7 @@ export default function ScreenSettings() {
   const colors = useTheme();
   const router = useRouter();
   const { user, refreshUserProfile, changePassword, updateProfile, logout } = useAuth();
-  const { farmInfo, inventory, dispenseFeedBag, addInventoryItem, hopperKg } = useFarm();
+  const { farmInfo, inventory, dispenseFeedBag, addInventoryItem, hopperKg, selectedFarm, ponds } = useFarm();
 
   // Active segment: 'account' (Tài khoản & Bảo mật) | 'supplies' (Kho vật tư)
   const [activeSegment, setActiveSegment] = useState<'account' | 'supplies'>('account');
@@ -54,16 +54,12 @@ export default function ScreenSettings() {
   const getRoleLabel = (role?: string) => {
     switch (role) {
       case 'admin':
-        return 'Quản trị viên hệ thống';
+        return 'Quản trị viên';
+      case 'manager':
+        return 'Quản lý trang trại';
       case 'farmer':
-        return 'Chủ đầm / Người nuôi tôm';
-      case 'operator':
-      case 'technician':
-        return 'Chủ đầm / Người nuôi tôm';
-      case 'guest_offline':
-        return 'Bà con xem ngoại tuyến';
       default:
-        return 'Chủ đầm / Người nuôi tôm';
+        return 'Người nuôi';
     }
   };
 
@@ -178,7 +174,7 @@ export default function ScreenSettings() {
   const handleLogout = () => {
     Alert.alert(
       'Đăng Xuất Tài Khoản',
-      'Bà con có chắc chắn muốn đăng xuất tài khoản kỹ sư khỏi thiết bị này?',
+      'Bạn có chắc chắn muốn đăng xuất khỏi thiết bị này?',
       [
         { text: 'Hủy', style: 'cancel' },
         {
@@ -328,7 +324,7 @@ export default function ScreenSettings() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.profileName, { color: colors.onSurface }]}>
-                      {user?.fullName || farmInfo.farmerName}
+                      {user?.fullName || user?.name || 'Người nuôi'}
                     </Text>
                     <View style={styles.roleBadge}>
                       <MaterialIcons name="badge" size={14} color="#006E2D" />
@@ -432,7 +428,7 @@ export default function ScreenSettings() {
                     { opacity: pressed ? 0.85 : 1 },
                   ]}>
                   <MaterialIcons name="password" size={20} color="#FFFFFF" />
-                  <Text style={styles.btnOpenChangePassText}>ĐỔI MẬT KHẨU KỸ SƯ</Text>
+                  <Text style={styles.btnOpenChangePassText}>ĐỔI MẬT KHẨU</Text>
                 </Pressable>
               </View>
 
@@ -446,37 +442,35 @@ export default function ScreenSettings() {
                   },
                 ]}>
                 <View style={styles.cardTitleRow}>
-                  <MaterialIcons name="water" size={22} color="#006398" />
+                  <MaterialIcons name="business" size={22} color="#006398" />
                   <Text style={[styles.cardTitleText, { color: colors.onSurface }]}>
                     THÔNG TIN TRANG TRẠI LIÊN KẾT
                   </Text>
                 </View>
-                <View style={styles.farmDetailsGrid}>
-                  <View style={styles.farmRow}>
-                    <Text style={styles.farmLabel}>Trang trại:</Text>
-                    <Text style={styles.farmVal}>{farmInfo.farmName}</Text>
+                {selectedFarm ? (
+                  <View style={styles.farmDetailsGrid}>
+                    <View style={styles.farmRow}>
+                      <Text style={styles.farmLabel}>Trang trại:</Text>
+                      <Text style={styles.farmVal}>{selectedFarm.name}</Text>
+                    </View>
+                    <View style={styles.farmRow}>
+                      <Text style={styles.farmLabel}>Địa chỉ:</Text>
+                      <Text style={styles.farmVal}>{selectedFarm.address || 'Chưa cập nhật'}</Text>
+                    </View>
+                    <View style={styles.farmRow}>
+                      <Text style={styles.farmLabel}>Ao phụ trách:</Text>
+                      <Text style={[styles.farmVal, { color: '#006E2D', fontWeight: '800' }]}>
+                        {ponds.length > 0 ? `${ponds.length} ao nuôi` : 'Chưa có ao phân công'}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={styles.farmRow}>
-                    <Text style={styles.farmLabel}>Khu vực nuôi:</Text>
-                    <Text style={styles.farmVal}>{farmInfo.location}</Text>
-                  </View>
-                  <View style={styles.farmRow}>
-                    <Text style={styles.farmLabel}>Độ mặn trạm:</Text>
-                    <Text style={[styles.farmVal, { color: '#006E2D', fontWeight: '900' }]}>
-                      {farmInfo.salinity}‰ (Đạt chuẩn)
+                ) : (
+                  <View style={{ paddingVertical: 14, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 13, color: colors.onSurfaceVariant }}>
+                      Chưa có dữ liệu trang trại liên kết
                     </Text>
                   </View>
-                  <View style={styles.farmRow}>
-                    <Text style={styles.farmLabel}>Lịch con nước:</Text>
-                    <Text style={styles.farmVal}>{farmInfo.tideInfo}</Text>
-                  </View>
-                  <View style={styles.farmRow}>
-                    <Text style={styles.farmLabel}>Chứng nhận:</Text>
-                    <Text style={[styles.farmVal, { color: '#006E2D', fontWeight: '800' }]}>
-                      VietGAP Aquaculture 2026
-                    </Text>
-                  </View>
-                </View>
+                )}
               </View>
 
               {/* Logout Button */}
@@ -489,8 +483,6 @@ export default function ScreenSettings() {
                 <MaterialIcons name="logout" size={22} color="#BA1A1A" />
                 <Text style={styles.btnLogoutText}>ĐĂNG XUẤT KHỎI HỆ THỐNG</Text>
               </Pressable>
-
-              <Text style={styles.versionText}>ShrimpMate Mobile v1.0.0 • Expo SDK 57</Text>
             </View>
           ) : (
             /* ==================================================== */
@@ -659,7 +651,15 @@ export default function ScreenSettings() {
           </View>
 
           <View style={styles.inventoryList}>
-            {filteredItems.map((item) => {
+            {filteredItems.length === 0 ? (
+              <View style={{ paddingVertical: 36, alignItems: 'center' }}>
+                <MaterialIcons name="inventory-2" size={44} color={colors.outlineVariant} />
+                <Text style={{ marginTop: 8, fontSize: 13, color: colors.onSurfaceVariant }}>
+                  Chưa có dữ liệu vật tư trong kho
+                </Text>
+              </View>
+            ) : (
+              filteredItems.map((item) => {
               const isLow = item.stockStatus === 'low';
               const isFeed = item.category === 'feed';
 
@@ -736,7 +736,7 @@ export default function ScreenSettings() {
                   </View>
                 </View>
               );
-            })}
+            }))}
           </View>
         </View>
       )}
@@ -872,7 +872,7 @@ export default function ScreenSettings() {
             <View style={styles.modalHeader}>
               <View style={styles.modalHeaderTitleGroup}>
                 <MaterialIcons name="lock" size={24} color="#EA580C" />
-                <Text style={styles.modalHeading}>ĐỔI MẬT KHẨU KỸ SƯ</Text>
+                <Text style={styles.modalHeading}>ĐỔI MẬT KHẨU</Text>
               </View>
               <Pressable
                 onPress={() => setShowChangePassModal(false)}
