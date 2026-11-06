@@ -76,6 +76,16 @@ export default function ScreenTrayWater() {
   } = useFarm();
 
   const [manualFisSelected, setManualFisSelected] = React.useState<boolean>(false);
+  const [isManualRefreshing, setIsManualRefreshing] = React.useState<boolean>(false);
+
+  const handlePullRefresh = async (refreshAction: () => Promise<void>) => {
+    setIsManualRefreshing(true);
+    try {
+      await refreshAction();
+    } finally {
+      setIsManualRefreshing(false);
+    }
+  };
 
   React.useEffect(() => {
     setManualFisSelected(false);
@@ -145,8 +155,8 @@ export default function ScreenTrayWater() {
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
-              refreshing={isRefreshingPondData}
-              onRefresh={refreshFarmsAndPonds}
+              refreshing={isManualRefreshing}
+              onRefresh={() => handlePullRefresh(refreshFarmsAndPonds)}
               colors={['#EA580C']}
               tintColor="#EA580C"
             />
@@ -168,8 +178,8 @@ export default function ScreenTrayWater() {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={isRefreshingPondData}
-            onRefresh={refreshPondOperationalData}
+            refreshing={isManualRefreshing}
+            onRefresh={() => handlePullRefresh(refreshPondOperationalData)}
             colors={['#EA580C']}
             tintColor="#EA580C"
           />
@@ -405,7 +415,7 @@ export default function ScreenTrayWater() {
             ]}>
             <View style={styles.appetiteHeaderRow}>
               <Text style={[styles.appetiteHeading, { color: colors.onSurface }]}>
-                CHỈ SỐ BẮT MỒI FIS (4 MỨC CHUẨN AI & NGƯỜI NUÔI)
+                ĐÁNH GIÁ SỨC ĂN TRÊN NHÁ (FIS)
               </Text>
               <Text style={styles.fisScoreTag}>
                 {hasFisData && fisScore !== undefined ? `FIS = ${fisScore.toFixed(2)}` : 'FIS = --'}

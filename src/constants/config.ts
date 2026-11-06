@@ -21,7 +21,7 @@ export const AppConfig = {
   version: '1.0.0',
   apiBaseUrl: resolveApiBaseUrl(),
   socketUrl: process.env.EXPO_PUBLIC_SOCKET_URL || 'ws://localhost:3000',
-  requestTimeoutMs: 15000,
+  requestTimeoutMs: 8000,
   storageKeys: {
     authToken: '@shrimpmate_auth_token',
     refreshToken: '@shrimpmate_refresh_token',

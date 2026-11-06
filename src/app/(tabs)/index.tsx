@@ -44,6 +44,16 @@ export default function ScreenFeedingLog() {
   const [safetyPreview, setSafetyPreview] = useState<EvaluateSafetyResponse | null>(null);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [isSubmittingExtra, setIsSubmittingExtra] = useState(false);
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+
+  const handlePullRefresh = async (refreshAction: () => Promise<void>) => {
+    setIsManualRefreshing(true);
+    try {
+      await refreshAction();
+    } finally {
+      setIsManualRefreshing(false);
+    }
+  };
 
   const hasAssignedPond = Boolean(selectedPond && ponds.length > 0);
   if (!hasAssignedPond) {
@@ -55,8 +65,8 @@ export default function ScreenFeedingLog() {
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
-              refreshing={isRefreshingPondData}
-              onRefresh={refreshFarmsAndPonds}
+              refreshing={isManualRefreshing}
+              onRefresh={() => handlePullRefresh(refreshFarmsAndPonds)}
               colors={['#EA580C']}
               tintColor="#EA580C"
             />
@@ -204,8 +214,8 @@ export default function ScreenFeedingLog() {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={isRefreshingPondData}
-            onRefresh={refreshPondOperationalData}
+            refreshing={isManualRefreshing}
+            onRefresh={() => handlePullRefresh(refreshPondOperationalData)}
             colors={['#EA580C']}
             tintColor="#EA580C"
           />
@@ -274,7 +284,7 @@ export default function ScreenFeedingLog() {
               <View style={[styles.badgePill, { backgroundColor: colors.secondaryContainer }]}>
                 <View style={[styles.dot, { backgroundColor: colors.secondary }]} />
                 <Text style={[styles.badgeText, { color: colors.onSecondaryContainer }]}>
-                  {feedMeals.length} Cữ • {fisLevel !== undefined ? `FIS Mức ${fisLevel}` : 'FIS: --'}
+                  {fisLevel !== undefined ? `${feedMeals.length} Cữ • Mức ăn ${fisLevel}` : `${feedMeals.length} Cữ ăn`}
                 </Text>
               </View>
             </View>

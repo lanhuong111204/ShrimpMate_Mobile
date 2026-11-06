@@ -437,7 +437,7 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoadingFarms(false);
     }
-  }, [isAuthenticated, user, loadPondOperationalData]);
+  }, [isAuthenticated, user?.id, loadPondOperationalData]);
 
   useEffect(() => {
     loadFarmsAndPonds();

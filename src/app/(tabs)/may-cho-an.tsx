@@ -52,6 +52,16 @@ export default function ScreenLiveFeeder() {
   const [safetyPreview, setSafetyPreview] = useState<EvaluateSafetyResponse | null>(null);
   const [isEvaluatingSafety, setIsEvaluatingSafety] = useState(false);
   const [isTriggeringFeed, setIsTriggeringFeed] = useState(false);
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+
+  const handlePullRefresh = async (refreshAction: () => Promise<void>) => {
+    setIsManualRefreshing(true);
+    try {
+      await refreshAction();
+    } finally {
+      setIsManualRefreshing(false);
+    }
+  };
 
   const hasAssignedPond = Boolean(selectedPond && ponds.length > 0);
 
@@ -79,8 +89,8 @@ export default function ScreenLiveFeeder() {
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
-              refreshing={isRefreshingPondData}
-              onRefresh={refreshFarmsAndPonds}
+              refreshing={isManualRefreshing}
+              onRefresh={() => handlePullRefresh(refreshFarmsAndPonds)}
               colors={['#EA580C']}
               tintColor="#EA580C"
             />
@@ -189,8 +199,8 @@ export default function ScreenLiveFeeder() {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={isRefreshingPondData}
-            onRefresh={refreshPondOperationalData}
+            refreshing={isManualRefreshing}
+            onRefresh={() => handlePullRefresh(refreshPondOperationalData)}
             colors={['#EA580C']}
             tintColor="#EA580C"
           />
