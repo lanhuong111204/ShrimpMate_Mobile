@@ -21,11 +21,14 @@ function RootNavigator() {
     const inAuthGroup = segments[0] === '(auth)';
     const isFarmSetup = segments[1] === 'farm-setup';
     const isFirstChangePassword = (segments[1] as string) === 'first-change-password';
+    const isLoginScreen = (segments[1] as string) === 'login';
 
     if (!isAuthenticated && !inAuthGroup) {
       router.replace('/(auth)/login');
     } else if (isAuthenticated && isFirstLogin) {
-      if (!isFirstChangePassword) {
+      // Nếu đang ở màn hình login thì giữ nguyên để hiển thị Modal đổi mật khẩu lần đầu;
+      // Nếu mở lại app từ trạng thái khác (cold boot) thì điều hướng về trang đổi mật khẩu lần đầu.
+      if (!isFirstChangePassword && !isLoginScreen) {
         router.replace('/(auth)/first-change-password' as any);
       }
     } else if (isAuthenticated && inAuthGroup && !isFarmSetup && !isFirstChangePassword) {

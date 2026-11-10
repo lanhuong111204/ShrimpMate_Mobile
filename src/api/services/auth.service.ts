@@ -18,6 +18,15 @@ import {
   VerifyResetOtpResponse,
 } from '@/types/auth';
 
+function normalizeUser(user: User): User {
+  if (!user.name && user.fullName) user.name = user.fullName;
+  if (!user.phone && user.phoneNumber) user.phone = user.phoneNumber;
+  const firstLogin = Boolean(user.mustChangePassword ?? user.isFirstLogin);
+  user.mustChangePassword = firstLogin;
+  user.isFirstLogin = firstLogin;
+  return user;
+}
+
 export const authService = {
   /**
    * Xác thực tài khoản có quyền Người nuôi (Farmer) hay không
@@ -57,8 +66,7 @@ export const authService = {
     const response = await apiClient.patch<User>(Endpoints.auth.profile, payload);
     const updatedUser = response.data;
     if (updatedUser) {
-      if (!updatedUser.name && updatedUser.fullName) updatedUser.name = updatedUser.fullName;
-      if (!updatedUser.phone && updatedUser.phoneNumber) updatedUser.phone = updatedUser.phoneNumber;
+      normalizeUser(updatedUser);
       await Storage.setJSON(AppConfig.storageKeys.userData, updatedUser);
     }
     return updatedUser;
@@ -115,8 +123,7 @@ export const authService = {
         await Storage.setItem(AppConfig.storageKeys.refreshToken, resData.refreshToken);
       }
       if (resData.user) {
-        if (!resData.user.name && resData.user.fullName) resData.user.name = resData.user.fullName;
-        if (!resData.user.phone && resData.user.phoneNumber) resData.user.phone = resData.user.phoneNumber;
+        normalizeUser(resData.user);
         await Storage.setJSON(AppConfig.storageKeys.userData, resData.user);
       }
     }
@@ -140,8 +147,7 @@ export const authService = {
         await Storage.setItem(AppConfig.storageKeys.refreshToken, data.refreshToken);
       }
       if (data.user) {
-        if (!data.user.name && data.user.fullName) data.user.name = data.user.fullName;
-        if (!data.user.phone && data.user.phoneNumber) data.user.phone = data.user.phoneNumber;
+        normalizeUser(data.user);
         await Storage.setJSON(AppConfig.storageKeys.userData, data.user);
       }
     }
@@ -217,13 +223,13 @@ export const authService = {
     try {
       const response = await apiClient.get<User>(Endpoints.auth.me);
       if (response.data) {
-        if (!response.data.name && response.data.fullName) response.data.name = response.data.fullName;
-        if (!response.data.phone && response.data.phoneNumber) response.data.phone = response.data.phoneNumber;
+        normalizeUser(response.data);
         await Storage.setJSON(AppConfig.storageKeys.userData, response.data);
       }
       return response.data;
     } catch {
-      return Storage.getJSON<User>(AppConfig.storageKeys.userData);
+      const cached = await Storage.getJSON<User>(AppConfig.storageKeys.userData);
+      return cached ? normalizeUser(cached) : null;
     }
   },
 

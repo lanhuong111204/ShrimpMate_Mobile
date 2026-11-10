@@ -11,6 +11,7 @@ export interface User {
   isActive: boolean;
   avatarUrl?: string;
   managerId?: string | null;
+  mustChangePassword?: boolean;
   isFirstLogin?: boolean;
   assignedFarmsCount?: number;
   assignedPondsCount?: number;
@@ -48,6 +49,7 @@ export interface FarmerUserSummary {
   phoneNumber?: string | null;
   isActive: boolean;
   managerId?: string | null;
+  mustChangePassword?: boolean;
   isFirstLogin?: boolean;
   assignments?: FarmerAssignment[];
   createdAt: string;

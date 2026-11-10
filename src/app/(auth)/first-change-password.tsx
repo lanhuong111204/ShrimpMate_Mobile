@@ -34,6 +34,10 @@ export default function ScreenFirstChangePassword() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleSubmit = async () => {
+    if (!currentPassword) {
+      setErrorMessage('Vui lòng nhập mật khẩu khởi tạo do Quản lý trang trại cấp');
+      return;
+    }
     if (!newPassword || newPassword.length < 8) {
       setErrorMessage('Mật khẩu mới phải có tối thiểu 8 ký tự');
       return;
@@ -46,7 +50,7 @@ export default function ScreenFirstChangePassword() {
     setErrorMessage(null);
     setIsSubmitting(true);
     try {
-      await firstTimeChangePassword(newPassword, currentPassword || undefined);
+      await firstTimeChangePassword(newPassword, currentPassword);
       Alert.alert(
         'Kích Hoạt Tài Khoản Thành Công! 🎉',
         'Mật khẩu bảo mật cá nhân của bạn đã được cập nhật an toàn. Chào mừng bạn bắt đầu ca vận hành ao nuôi.',
@@ -163,9 +167,9 @@ export default function ScreenFirstChangePassword() {
               THIẾT LẬP MẬT KHẨU BẢO MẬT
             </Text>
 
-            {/* Field: Mật khẩu hiện tại (Tùy chọn nếu nhận được từ quản lý) */}
+            {/* Field: Mật khẩu hiện tại (nhận từ quản lý) */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>MẬT KHẨU KHỞI TẠO TỪ QUẢN LÝ (NẾU CÓ)</Text>
+              <Text style={styles.inputLabel}>MẬT KHẨU KHỞI TẠO TỪ QUẢN LÝ *</Text>
               <View
                 style={[
                   styles.inputRow,
