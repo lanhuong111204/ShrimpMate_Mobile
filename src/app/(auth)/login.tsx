@@ -26,6 +26,7 @@ export default function ScreenLogin() {
   const router = useRouter();
   const {
     login,
+    logout,
     firstTimeChangePassword,
     forgotPassword,
     verifyResetOtp,
@@ -97,7 +98,10 @@ export default function ScreenLogin() {
       });
 
       // Nếu tài khoản yêu cầu đổi mật khẩu lần đầu (được cấp bởi Quản lý)
-      if (loggedUser?.isFirstLogin) {
+      if (loggedUser?.mustChangePassword || loggedUser?.isFirstLogin) {
+        setFirstNewPassword('');
+        setFirstConfirmPassword('');
+        setFirstPasswordError(null);
         setShowFirstLoginModal(true);
         return;
       }
@@ -527,7 +531,9 @@ export default function ScreenLogin() {
         transparent
         animationType="slide"
         onRequestClose={() => {}}>
-        <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalBackdrop}>
           <View style={[styles.modalCard, { borderColor: '#EA580C', borderWidth: 1.5 }]}>
             <View style={{ alignItems: 'center', gap: 8, paddingBottom: 6 }}>
               <View
@@ -558,7 +564,7 @@ export default function ScreenLogin() {
                   lineHeight: 18,
                   textAlign: 'center',
                 }}>
-                Tài khoản của bạn được cấp bởi Quản lý đầm. Để bảo mật thông tin vuông tôm, vui lòng thiết lập mật khẩu cá nhân mới trước khi bắt đầu.
+                Tài khoản của bạn được cấp bởi Quản lý trang trại. Để bảo mật thông tin vuông tôm, vui lòng thiết lập mật khẩu cá nhân mới trước khi bắt đầu.
               </Text>
             </View>
 
@@ -568,13 +574,14 @@ export default function ScreenLogin() {
               <View style={styles.inputRow}>
                 <MaterialIcons name="lock" size={20} color="#8C7164" />
                 <TextInput
-                  style={styles.inputField}
+                  style={[styles.inputField, { color: '#0B1C30' }]}
                   value={firstNewPassword}
                   onChangeText={(val) => {
                     setFirstNewPassword(val);
                     setFirstPasswordError(null);
                   }}
                   secureTextEntry={!showFirstNewPassword}
+                  autoCapitalize="none"
                   placeholder="Nhập mật khẩu mới..."
                   placeholderTextColor="#8C7164"
                 />
@@ -596,13 +603,14 @@ export default function ScreenLogin() {
               <View style={styles.inputRow}>
                 <MaterialIcons name="lock-outline" size={20} color="#8C7164" />
                 <TextInput
-                  style={styles.inputField}
+                  style={[styles.inputField, { color: '#0B1C30' }]}
                   value={firstConfirmPassword}
                   onChangeText={(val) => {
                     setFirstConfirmPassword(val);
                     setFirstPasswordError(null);
                   }}
                   secureTextEntry={!showFirstConfirmPassword}
+                  autoCapitalize="none"
                   placeholder="Nhập lại mật khẩu mới..."
                   placeholderTextColor="#8C7164"
                 />
@@ -641,8 +649,27 @@ export default function ScreenLogin() {
                 </>
               )}
             </Pressable>
+
+            <Pressable
+              onPress={async () => {
+                setShowFirstLoginModal(false);
+                setPassword('');
+                await logout();
+              }}
+              disabled={isFirstPasswordSubmitting}
+              style={({ pressed }) => [
+                {
+                  alignItems: 'center',
+                  paddingVertical: 6,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#584237' }}>
+                Hủy & Đăng nhập tài khoản khác
+              </Text>
+            </Pressable>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* MODAL: QUÊN MẬT KHẨU (FORGOT PASSWORD 3 BƯỚC CHUẨN) */}

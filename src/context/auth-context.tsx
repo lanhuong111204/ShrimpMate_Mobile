@@ -190,8 +190,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         newPassword,
       });
       if (user) {
+        const loginIdentifier = user.phoneNumber || user.email;
+        if (loginIdentifier) {
+          try {
+            const reloginRes = await authService.login({
+              identifier: loginIdentifier,
+              password: newPassword,
+            });
+            if (reloginRes?.user) {
+              const refreshedUser: User = {
+                ...reloginRes.user,
+                mustChangePassword: false,
+                isFirstLogin: false,
+              };
+              setUser(refreshedUser);
+              await Storage.setJSON(AppConfig.storageKeys.userData, refreshedUser);
+              return res.message || 'Đổi mật khẩu lần đầu thành công';
+            }
+          } catch {
+            // Fallback cập nhật cục bộ nếu mạng chập chờn
+          }
+        }
         const updatedUser: User = {
           ...user,
+          mustChangePassword: false,
           isFirstLogin: false,
         };
         setUser(updatedUser);
@@ -248,7 +270,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         isAuthenticated: !!user,
         isOfflineMode: user?.role === 'guest_offline' || user?.id === 'usr_offline',
-        isFirstLogin: !!user?.isFirstLogin,
+        isFirstLogin: Boolean(user?.mustChangePassword || user?.isFirstLogin),
         login,
         register,
         forgotPassword,
