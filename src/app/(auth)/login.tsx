@@ -20,6 +20,69 @@ import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/context/auth-context';
 import { OtpInput } from '@/components/common/otp-input';
 
+const DEFAULT_LOCKOUT_MINUTES = 15;
+
+function formatLockoutCountdown(totalSeconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const mins = Math.floor(safeSeconds / 60);
+  const secs = safeSeconds % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+function extractLockoutMinutes(err: any, message: string): number {
+  const rawMinutes =
+    err?.remainingMinutes ??
+    err?.details?.remainingMinutes ??
+    err?.details?.data?.remainingMinutes;
+  if (rawMinutes !== undefined && rawMinutes !== null && !Number.isNaN(Number(rawMinutes))) {
+    const parsed = Math.ceil(Number(rawMinutes));
+    if (parsed > 0) return parsed;
+  }
+
+  const match = message.match(/(\d+)\s*phút/i);
+  if (match && Number(match[1]) > 0) {
+    return Number(match[1]);
+  }
+
+  return DEFAULT_LOCKOUT_MINUTES;
+}
+
+function classifyLogin403Error(err: any): 'permanent' | 'temporary' | 'other' {
+  const msg = String(err?.message || '');
+  const lowerMsg = msg.toLowerCase();
+  const upperMsg = msg.toUpperCase();
+  const detailsCode = String(
+    err?.details?.code || err?.details?.status || err?.code || ''
+  ).toUpperCase();
+
+  if (
+    upperMsg.includes('ACCOUNT_PENDING_ADMIN_UNLOCK') ||
+    detailsCode === 'ACCOUNT_PENDING_ADMIN_UNLOCK' ||
+    lowerMsg.includes('vĩnh viễn') ||
+    lowerMsg.includes('10 lần') ||
+    lowerMsg.includes('admin')
+  ) {
+    return 'permanent';
+  }
+
+  const hasRemainingMinutes =
+    err?.remainingMinutes !== undefined ||
+    err?.details?.remainingMinutes !== undefined ||
+    err?.details?.data?.remainingMinutes !== undefined;
+
+  if (
+    hasRemainingMinutes ||
+    lowerMsg.includes('tạm thời') ||
+    lowerMsg.includes('phút') ||
+    lowerMsg.includes('5 lần') ||
+    lowerMsg.includes('khóa')
+  ) {
+    return 'temporary';
+  }
+
+  return 'other';
+}
+
 export default function ScreenLogin() {
   const insets = useSafeAreaInsets();
   const colors = useTheme();
@@ -40,6 +103,13 @@ export default function ScreenLogin() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+
+  // Brute-force lockout state (403 Temporary 5 attempts / Permanent 10 attempts)
+  const [tempLockoutMessage, setTempLockoutMessage] = useState<string | null>(null);
+  const [lockoutEndAt, setLockoutEndAt] = useState<number | null>(null);
+  const [lockoutRemainingSeconds, setLockoutRemainingSeconds] = useState(0);
+  const [permanentLockoutMessage, setPermanentLockoutMessage] = useState<string | null>(null);
+  const isTempLocked = lockoutRemainingSeconds > 0;
 
   // RBAC Role Forbidden Modal state (Admin & Manager)
   const [showForbiddenModal, setShowForbiddenModal] = useState(false);
@@ -79,8 +149,32 @@ export default function ScreenLogin() {
     return () => clearInterval(timer);
   }, [countdown]);
 
+  // Countdown timer for brute-force temporary lockout (MM:SS)
+  React.useEffect(() => {
+    if (!lockoutEndAt) {
+      setLockoutRemainingSeconds(0);
+      return;
+    }
+
+    const updateRemaining = () => {
+      const remaining = Math.max(0, Math.ceil((lockoutEndAt - Date.now()) / 1000));
+      setLockoutRemainingSeconds(remaining);
+      if (remaining <= 0) {
+        setLockoutEndAt(null);
+        setTempLockoutMessage(null);
+      }
+    };
+
+    updateRemaining();
+    const timer = setInterval(updateRemaining, 1000);
+    return () => clearInterval(timer);
+  }, [lockoutEndAt]);
+
   // Primary Login Action - directly calls Backend API with RBAC Guard
   const handleLogin = async () => {
+    if (isTempLocked) {
+      return;
+    }
     if (!identifier.trim()) {
       setLoginError('Vui lòng nhập Email hoặc Số điện thoại');
       return;
@@ -91,6 +185,7 @@ export default function ScreenLogin() {
     }
 
     setLoginError(null);
+    setPermanentLockoutMessage(null);
     try {
       const loggedUser = await login({
         identifier: identifier.trim(),
@@ -114,12 +209,38 @@ export default function ScreenLogin() {
           'Tài khoản Quản lý trang trại vui lòng đăng nhập trên hệ thống Quản lý Web để quản lý trang trại và phân công ao nuôi.'
         );
         setShowForbiddenModal(true);
-      } else if (err?.isForbiddenAdmin || err?.forbiddenRole === 'admin' || err?.statusCode === 403) {
+      } else if (err?.isForbiddenAdmin || err?.forbiddenRole === 'admin') {
         setForbiddenRole('admin');
         setForbiddenMsg(
           'Tài khoản Quản trị viên không được phép truy cập ứng dụng di động. Vui lòng đăng nhập trên hệ thống Quản trị Web.'
         );
         setShowForbiddenModal(true);
+      } else if (err?.statusCode === 403) {
+        const msg = String(err?.message || '');
+        const lockoutType = classifyLogin403Error(err);
+
+        if (lockoutType === 'permanent') {
+          setLockoutEndAt(null);
+          setLockoutRemainingSeconds(0);
+          setTempLockoutMessage(null);
+          setLoginError(null);
+          setPermanentLockoutMessage(
+            msg ||
+              'Tài khoản đang trong trạng thái ACCOUNT_PENDING_ADMIN_UNLOCK do nhập sai mật khẩu quá nhiều lần. Vui lòng liên hệ Admin hoặc Quản lý trang trại để mở khóa.'
+          );
+        } else if (lockoutType === 'temporary') {
+          const minutes = extractLockoutMinutes(err, msg);
+          setPermanentLockoutMessage(null);
+          setLoginError(null);
+          setTempLockoutMessage(
+            msg ||
+              `Tài khoản tạm thời bị khóa ${minutes} phút do đăng nhập sai nhiều lần liên tiếp.`
+          );
+          setLockoutRemainingSeconds(minutes * 60);
+          setLockoutEndAt(Date.now() + minutes * 60 * 1000);
+        } else {
+          setLoginError(msg || 'Tài khoản không có quyền truy cập ứng dụng.');
+        }
       } else {
         setLoginError(
           err?.message || 'Email/số điện thoại hoặc mật khẩu không đúng'
@@ -313,7 +434,12 @@ export default function ScreenLogin() {
                   styles.inputRow,
                   {
                     backgroundColor: colors.surfaceContainerLow,
-                    borderColor: loginError ? colors.error : colors.outlineVariant + '70',
+                    borderColor:
+                      loginError || permanentLockoutMessage
+                        ? colors.error
+                        : isTempLocked
+                        ? '#F59E0B'
+                        : colors.outlineVariant + '70',
                   },
                 ]}>
                 <MaterialIcons name="account-circle" size={20} color="#8C7164" />
@@ -323,6 +449,12 @@ export default function ScreenLogin() {
                   onChangeText={(val) => {
                     setIdentifier(val);
                     setLoginError(null);
+                    setPermanentLockoutMessage(null);
+                    if (isTempLocked || tempLockoutMessage) {
+                      setLockoutEndAt(null);
+                      setLockoutRemainingSeconds(0);
+                      setTempLockoutMessage(null);
+                    }
                   }}
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -330,7 +462,18 @@ export default function ScreenLogin() {
                   placeholderTextColor="#8C7164"
                 />
                 {!!identifier && (
-                  <Pressable onPress={() => setIdentifier('')} style={{ padding: 4 }}>
+                  <Pressable
+                    onPress={() => {
+                      setIdentifier('');
+                      setLoginError(null);
+                      setPermanentLockoutMessage(null);
+                      if (isTempLocked || tempLockoutMessage) {
+                        setLockoutEndAt(null);
+                        setLockoutRemainingSeconds(0);
+                        setTempLockoutMessage(null);
+                      }
+                    }}
+                    style={{ padding: 4 }}>
                     <MaterialIcons name="cancel" size={18} color={colors.outlineVariant} />
                   </Pressable>
                 )}
@@ -356,7 +499,12 @@ export default function ScreenLogin() {
                   styles.inputRow,
                   {
                     backgroundColor: colors.surfaceContainerLow,
-                    borderColor: loginError ? colors.error : colors.outlineVariant + '70',
+                    borderColor:
+                      loginError || permanentLockoutMessage
+                        ? colors.error
+                        : isTempLocked
+                        ? '#F59E0B'
+                        : colors.outlineVariant + '70',
                   },
                 ]}>
                 <MaterialIcons name="lock" size={20} color="#8C7164" />
@@ -384,6 +532,49 @@ export default function ScreenLogin() {
               </View>
             </View>
 
+            {/* Temporary Lockout Alert Box (5 failed attempts / 15m countdown) */}
+            {isTempLocked && (
+              <View style={styles.tempLockoutBox}>
+                <View style={styles.lockoutHeaderRow}>
+                  <View style={styles.lockoutTitleGroup}>
+                    <MaterialIcons name="timer" size={20} color="#B45309" />
+                    <Text style={styles.tempLockoutTitle}>TÀI KHOẢN TẠM THỜI BỊ KHÓA</Text>
+                  </View>
+                  <View style={styles.countdownPill}>
+                    <Text style={styles.countdownPillText}>
+                      {formatLockoutCountdown(lockoutRemainingSeconds)}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.tempLockoutBody}>
+                  {tempLockoutMessage ||
+                    'Tài khoản tạm thời bị khóa do đăng nhập sai nhiều lần liên tiếp.'}
+                </Text>
+                <Text style={styles.tempLockoutHint}>
+                  Vui lòng đợi hết thời gian đếm ngược ({formatLockoutCountdown(lockoutRemainingSeconds)}) để thử đăng nhập lại.
+                </Text>
+              </View>
+            )}
+
+            {/* Permanent Lockout Alert Box (10 failed attempts / ACCOUNT_PENDING_ADMIN_UNLOCK) */}
+            {permanentLockoutMessage && (
+              <View style={styles.permanentLockoutBox}>
+                <View style={styles.lockoutTitleGroup}>
+                  <MaterialIcons name="lock" size={20} color="#BA1A1A" />
+                  <Text style={styles.permanentLockoutTitle}>
+                    TÀI KHOẢN BỊ KHÓA VĨNH VIỄN
+                  </Text>
+                </View>
+                <Text style={styles.permanentLockoutBody}>{permanentLockoutMessage}</Text>
+                <View style={styles.permanentLockoutGuide}>
+                  <MaterialIcons name="support-agent" size={16} color="#93000A" />
+                  <Text style={styles.permanentLockoutGuideText}>
+                    Vui lòng liên hệ Admin hoặc Quản lý trang trại để xác minh và mở khóa tài khoản.
+                  </Text>
+                </View>
+              </View>
+            )}
+
             {/* Error Message Display */}
             {loginError && (
               <View style={styles.errorRow}>
@@ -395,16 +586,23 @@ export default function ScreenLogin() {
             {/* Primary Submit Button */}
             <Pressable
               onPress={handleLogin}
-              disabled={isLoading}
+              disabled={isLoading || isTempLocked}
               style={({ pressed }) => [
                 styles.btnLogin,
                 {
-                  backgroundColor: '#EA580C',
-                  opacity: pressed || isLoading ? 0.85 : 1,
+                  backgroundColor: isTempLocked ? '#94A3B8' : '#EA580C',
+                  opacity: isTempLocked ? 0.85 : pressed || isLoading ? 0.85 : 1,
                 },
               ]}>
               {isLoading ? (
                 <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : isTempLocked ? (
+                <>
+                  <MaterialIcons name="lock" size={20} color="#FFFFFF" />
+                  <Text style={styles.btnLoginText}>
+                    TẠM KHÓA ({formatLockoutCountdown(lockoutRemainingSeconds)})
+                  </Text>
+                </>
               ) : (
                 <>
                   <MaterialIcons name="login" size={22} color="#FFFFFF" />
@@ -1389,5 +1587,92 @@ const styles = StyleSheet.create({
     color: '#EA580C',
     fontWeight: '800',
     textDecorationLine: 'underline',
+  },
+  tempLockoutBox: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#F59E0B',
+    borderWidth: 1.5,
+    borderRadius: 14,
+    padding: 12,
+    gap: 6,
+  },
+  lockoutHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  lockoutTitleGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  tempLockoutTitle: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#B45309',
+    letterSpacing: 0.2,
+  },
+  countdownPill: {
+    backgroundColor: '#FEF3C7',
+    borderColor: '#F59E0B',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  countdownPillText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#B45309',
+    fontVariant: ['tabular-nums'],
+  },
+  tempLockoutBody: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#78350F',
+    lineHeight: 18,
+  },
+  tempLockoutHint: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#B45309',
+  },
+  permanentLockoutBox: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#BA1A1A',
+    borderWidth: 1.5,
+    borderRadius: 14,
+    padding: 12,
+    gap: 8,
+  },
+  permanentLockoutTitle: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#BA1A1A',
+    letterSpacing: 0.2,
+  },
+  permanentLockoutBody: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#7F1D1D',
+    lineHeight: 18,
+  },
+  permanentLockoutGuide: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FFDAD6',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  permanentLockoutGuideText: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#93000A',
+    lineHeight: 16,
   },
 });

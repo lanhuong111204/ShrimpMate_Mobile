@@ -107,6 +107,8 @@ export const Endpoints = {
   ai: {
     recommendationsLatest: (pondId: string) => `/ponds/${pondId}/ai/recommendations/latest`,
     recommendationsHistory: (pondId: string) => `/ponds/${pondId}/ai/recommendations`,
+    predictFeed: (pondId: string) => `/ponds/${pondId}/ai/predict-feed`,
+    predictedTrends: (pondId: string) => `/ponds/${pondId}/ai/predicted-trends`,
     legacyRecommendations: (pondId: string) => `/ai-integration/ponds/${pondId}/recommendations`,
   },
 
