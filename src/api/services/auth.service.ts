@@ -234,8 +234,17 @@ export const authService = {
   },
 
   async logout(): Promise<void> {
-    await Storage.removeItem(AppConfig.storageKeys.authToken);
-    await Storage.removeItem(AppConfig.storageKeys.refreshToken);
-    await Storage.removeItem(AppConfig.storageKeys.userData);
+    try {
+      const token = await Storage.getItem(AppConfig.storageKeys.authToken);
+      if (token && token !== 'offline_session_shrimpmate') {
+        await apiClient.post(Endpoints.auth.logout);
+      }
+    } catch {
+      // Bỏ qua lỗi mạng hoặc 401 khi token đã hết hạn
+    } finally {
+      await Storage.removeItem(AppConfig.storageKeys.authToken);
+      await Storage.removeItem(AppConfig.storageKeys.refreshToken);
+      await Storage.removeItem(AppConfig.storageKeys.userData);
+    }
   },
 };

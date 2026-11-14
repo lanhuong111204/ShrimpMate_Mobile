@@ -4,23 +4,303 @@ import { AppConfig } from '@/constants/config';
 import { Storage } from '@/utils/storage';
 import { Pond, PondDevice, PondTelemetryLog, StatusLevel } from '@/types/pond';
 import { TelemetryHistoryQuery, TelemetryReading } from '@/types/telemetry';
-import { CameraAnalyzePayload, LatestFisResponse } from '@/types/camera';
-import { AiRecommendation } from '@/types/ai';
+import { AppetiteLevel, CameraAnalyzePayload, LatestFisResponse } from '@/types/camera';
+import {
+  AiRecommendation,
+  PredictFeedOverrideDto,
+  PredictFeedResponse,
+  PredictedTrendsResponse,
+} from '@/types/ai';
 import { FeedingRecord, FeedingSchedule, TriggerFeedingRequest } from '@/types/feeding';
 import { EvaluateSafetyRequest, EvaluateSafetyResponse } from '@/types/safety-rule';
 import { Device, EmergencyStopResponse } from '@/types/device';
 import { CropSeason, CropSeasonStatistics } from '@/types/crop-season';
 
+export type WaterMetricType = 'do' | 'ph' | 'nh3' | 'temperature' | 'salinity' | 'turbidity';
+
+export interface WaterStatusColorSet {
+  status: StatusLevel | 'empty';
+  color: string;
+  bgPill: string;
+  textColor: string;
+  borderColor: string;
+  label: string;
+}
+
+const APPETITE_DESCRIPTIONS: Record<AppetiteLevel, string> = {
+  0: 'Không ăn (Dư cám nhiều)',
+  1: 'Ăn yếu (Sót cám nhá)',
+  2: 'Bình thường (Tiêu thụ ổn)',
+  3: 'Ăn mạnh (Sạch nhá)',
+};
+
+const DEFAULT_LEFTOVER_BY_APPETITE: Record<AppetiteLevel, number> = {
+  0: 45,
+  1: 25,
+  2: 10,
+  3: 3,
+};
+
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function clampAppetiteLevel(value: number): AppetiteLevel {
+  const rounded = Math.round(value);
+  if (rounded <= 0) return 0;
+  if (rounded === 1) return 1;
+  if (rounded === 2) return 2;
+  return 3;
+}
+
+function normalizeAiRecommendation(raw: any): AiRecommendation | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const item = raw?.recommendation || raw?.data?.recommendation || raw?.data || raw;
+  if (
+    !item ||
+    typeof item !== 'object' ||
+    item.predictedFeedAmountKg === undefined ||
+    item.predictedFeedAmountKg === null ||
+    isNaN(Number(item.predictedFeedAmountKg))
+  ) {
+    return null;
+  }
+  return {
+    ...item,
+    predictedFeedAmountKg: Number(item.predictedFeedAmountKg),
+    safeAllowedAmountKg:
+      item.safeAllowedAmountKg !== undefined && item.safeAllowedAmountKg !== null
+        ? Number(item.safeAllowedAmountKg)
+        : undefined,
+    spreadRateKgPerMinute:
+      item.spreadRateKgPerMinute !== undefined && item.spreadRateKgPerMinute !== null
+        ? Number(item.spreadRateKgPerMinute)
+        : undefined,
+    appetiteLevel:
+      item.appetiteLevel !== undefined && item.appetiteLevel !== null
+        ? Number(item.appetiteLevel)
+        : undefined,
+    biomassKg:
+      item.biomassKg !== undefined && item.biomassKg !== null ? Number(item.biomassKg) : undefined,
+    feedRatePercent:
+      item.feedRatePercent !== undefined && item.feedRatePercent !== null
+        ? Number(item.feedRatePercent)
+        : undefined,
+    anomalyScore:
+      item.anomalyScore !== undefined && item.anomalyScore !== null
+        ? Number(item.anomalyScore)
+        : undefined,
+    confidence:
+      item.confidence !== undefined && item.confidence !== null
+        ? Number(item.confidence)
+        : undefined,
+  };
+}
+
+function normalizeFeedingRecords(items: any[]): FeedingRecord[] {
+  return items.map((rec) => ({
+    ...rec,
+    requestedAmountKg: Number(rec.requestedAmountKg) || 0,
+    actualAmountKg: Number(rec.actualAmountKg) || 0,
+    leftoverPercent:
+      rec.leftoverPercent !== undefined && rec.leftoverPercent !== null
+        ? Number(rec.leftoverPercent)
+        : undefined,
+    appetiteLevel:
+      rec.appetiteLevel !== undefined && rec.appetiteLevel !== null
+        ? Number(rec.appetiteLevel)
+        : undefined,
+  }));
+}
+
+function normalizeFisPayload(raw: any): LatestFisResponse | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const data = raw.data && typeof raw.data === 'object' && 'hasData' in raw.data ? raw.data : raw;
+  if (typeof data.hasData !== 'boolean') return null;
+  if (data.status) {
+    data.status = {
+      ...data.status,
+      fisScore: Number(data.status.fisScore) || 0,
+      appetiteLevel: clampAppetiteLevel(Number(data.status.appetiteLevel) || 0),
+      remainingFeedPercent: Number(data.status.remainingFeedPercent) || 0,
+      shrimpDensity: Number(data.status.shrimpDensity) || 0,
+      consumptionVelocity: Number(data.status.consumptionVelocity) || 0,
+      ageSeconds: Number(data.status.ageSeconds) || 0,
+    };
+    if (data.status.ageSeconds > 120) {
+      data.status.isStale = true;
+    }
+  }
+  return data as LatestFisResponse;
+}
+
+function buildSynthesizedFis(
+  pondId: string,
+  aiRec: AiRecommendation | null,
+  records: FeedingRecord[],
+  markFresh = false
+): LatestFisResponse {
+  const sortedRecords = [...records].sort((a, b) => {
+    const tA = new Date(a.startedAt || 0).getTime() || 0;
+    const tB = new Date(b.startedAt || 0).getTime() || 0;
+    return tB - tA;
+  });
+
+  const latestRecord =
+    sortedRecords.find(
+      (r) =>
+        (r.appetiteLevel !== undefined && r.appetiteLevel !== null) ||
+        (r.leftoverPercent !== undefined && r.leftoverPercent !== null)
+    ) ||
+    sortedRecords[0] ||
+    null;
+
+  if (!aiRec && !latestRecord) {
+    return { hasData: false, pondId };
+  }
+
+  let appetiteLevel: AppetiteLevel = 2;
+  if (
+    latestRecord?.appetiteLevel !== undefined &&
+    latestRecord.appetiteLevel !== null &&
+    !isNaN(Number(latestRecord.appetiteLevel))
+  ) {
+    appetiteLevel = clampAppetiteLevel(Number(latestRecord.appetiteLevel));
+  } else if (
+    aiRec?.appetiteLevel !== undefined &&
+    aiRec.appetiteLevel !== null &&
+    !isNaN(Number(aiRec.appetiteLevel))
+  ) {
+    appetiteLevel = clampAppetiteLevel(Number(aiRec.appetiteLevel));
+  } else if (
+    latestRecord?.leftoverPercent !== undefined &&
+    latestRecord.leftoverPercent !== null &&
+    !isNaN(Number(latestRecord.leftoverPercent))
+  ) {
+    const leftover = Number(latestRecord.leftoverPercent);
+    appetiteLevel = leftover <= 5 ? 3 : leftover <= 15 ? 2 : leftover <= 35 ? 1 : 0;
+  }
+
+  const remainingFeedPercent =
+    latestRecord?.leftoverPercent !== undefined &&
+    latestRecord.leftoverPercent !== null &&
+    !isNaN(Number(latestRecord.leftoverPercent))
+      ? Math.max(0, Math.min(100, Math.round(Number(latestRecord.leftoverPercent))))
+      : DEFAULT_LEFTOVER_BY_APPETITE[appetiteLevel];
+
+  const fisScore = Math.max(
+    0,
+    Math.min(
+      1,
+      Number((((100 - remainingFeedPercent) / 100) * 0.4 + (appetiteLevel / 3) * 0.6).toFixed(2))
+    )
+  );
+
+  const rawTimestamp = markFresh
+    ? new Date().toISOString()
+    : latestRecord?.startedAt || aiRec?.createdAt || new Date().toISOString();
+  const parsedTime = new Date(rawTimestamp).getTime();
+  const ageSeconds = markFresh
+    ? 1
+    : Number.isFinite(parsedTime)
+    ? Math.max(0, Math.floor((Date.now() - parsedTime) / 1000))
+    : 0;
+
+  return {
+    hasData: true,
+    pondId,
+    status: {
+      fisScore,
+      appetiteLevel,
+      appetiteLevelDescription: APPETITE_DESCRIPTIONS[appetiteLevel],
+      remainingFeedPercent,
+      shrimpDensity: Number((aiRec as any)?.shrimpDensity ?? (latestRecord as any)?.shrimpDensity ?? 0) || 0,
+      consumptionVelocity:
+        Number(aiRec?.spreadRateKgPerMinute ?? (latestRecord as any)?.consumptionVelocity ?? 0) || 0,
+      timestamp: rawTimestamp,
+      ageSeconds,
+      isStale: ageSeconds > 120,
+    },
+  };
+}
+
+async function synthesizeFisFromPondData(
+  pondId: string,
+  markFresh: boolean
+): Promise<LatestFisResponse> {
+  const [aiResult, recordsResult] = await Promise.allSettled([
+    apiClient.get<any>(Endpoints.ai.recommendationsLatest(pondId)),
+    apiClient.get<any>(Endpoints.feedings.records(pondId)),
+  ]);
+
+  const aiRec =
+    aiResult.status === 'fulfilled'
+      ? normalizeAiRecommendation(aiResult.value.data)
+      : normalizeAiRecommendation(
+          await Storage.getJSON<any>(`${AppConfig.storageKeys.cachedAiRec}_${pondId}`)
+        );
+
+  let records: FeedingRecord[] = [];
+  if (recordsResult.status === 'fulfilled') {
+    const raw = recordsResult.value.data;
+    const list: any[] = Array.isArray(raw)
+      ? raw
+      : raw && Array.isArray(raw.data)
+      ? raw.data
+      : [];
+    records = normalizeFeedingRecords(list);
+  } else {
+    const cachedRecs = await Storage.getJSON<any[]>(
+      `${AppConfig.storageKeys.cachedRecords}_${pondId}`
+    );
+    records = Array.isArray(cachedRecs) ? normalizeFeedingRecords(cachedRecs) : [];
+  }
+
+  if (
+    !markFresh &&
+    aiResult.status === 'rejected' &&
+    recordsResult.status === 'rejected' &&
+    !aiRec &&
+    records.length === 0
+  ) {
+    const cachedFis = await Storage.getJSON<any>(`${AppConfig.storageKeys.cachedFis}_${pondId}`);
+    const normalized = normalizeFisPayload(cachedFis);
+    if (normalized) {
+      if (normalized.status?.timestamp) {
+        const ageSec = Math.max(
+          0,
+          Math.floor((Date.now() - new Date(normalized.status.timestamp).getTime()) / 1000)
+        );
+        normalized.status.ageSeconds = ageSec;
+        normalized.status.isStale = ageSec > 120;
+      }
+      return normalized;
+    }
+    return { hasData: false, pondId };
+  }
+
+  const synthesized = buildSynthesizedFis(pondId, aiRec, records, markFresh);
+  if (synthesized.hasData) {
+    await Storage.setJSON(`${AppConfig.storageKeys.cachedFis}_${pondId}`, synthesized);
+  }
+  return synthesized;
+}
+
 /**
- * Đánh giá trạng thái an toàn sinh học của 6 chỉ số nước theo Quy tắc 3:
- * - Màu xanh (optimal): DO >= 5.0, pH 7.5 - 8.5, NH3 < 0.05, Temp 26 - 32, Salinity 10 - 25, Turbidity 10 - 40
- * - Màu vàng (warning): DO 3.5 - 5.0, pH 7.0 - 7.5 hoặc 8.5 - 9.0, NH3 0.05 - 0.1
- * - Màu đỏ (critical): DO < 3.5, pH < 7.0 hoặc > 9.0, NH3 > 0.1
+ * Đánh giá trạng thái an toàn sinh học của 6 chỉ số nước theo chuẩn Chương 7 PDF:
+ * - DO: xanh (optimal) >= 5.0, vàng (warning) 3.5 - 5.0, đỏ (critical) < 3.5 mg/L
+ * - pH: xanh (optimal) 7.5 - 8.5, vàng (warning) 7.0 - 7.5 hoặc 8.5 - 9.0, đỏ (critical) < 7.0 hoặc > 9.0
+ * - Temp: thích hợp (optimal) 28 - 32°C
+ * - Salinity: thích hợp (optimal) 10 - 25 ppt
+ * - NH3: nguy hiểm (critical) > 0.3 mg/L, cần chú ý (warning) 0.05 - 0.3 mg/L
+ * - Turbidity: thích hợp (optimal) 10 - 40 NTU
  */
-export function evaluateWaterMetricStatus(
-  type: 'do' | 'ph' | 'nh3' | 'temperature' | 'salinity' | 'turbidity',
-  value: number
-): StatusLevel {
+export function evaluateWaterMetricStatus(type: WaterMetricType, value: number): StatusLevel {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return 'unknown';
+  }
   switch (type) {
     case 'do':
       if (value < 3.5) return 'critical';
@@ -31,12 +311,12 @@ export function evaluateWaterMetricStatus(
       if (value < 7.5 || value > 8.5) return 'warning';
       return 'optimal';
     case 'nh3':
-      if (value > 0.1) return 'critical';
+      if (value > 0.3) return 'critical';
       if (value >= 0.05) return 'warning';
       return 'optimal';
     case 'temperature':
       if (value < 24.0 || value > 34.0) return 'critical';
-      if (value < 26.0 || value > 32.0) return 'warning';
+      if (value < 28.0 || value > 32.0) return 'warning';
       return 'optimal';
     case 'salinity':
       if (value < 5.0 || value > 35.0) return 'critical';
@@ -49,6 +329,62 @@ export function evaluateWaterMetricStatus(
     default:
       return 'optimal';
   }
+}
+
+/**
+ * Helper trả về bộ màu sắc chuẩn Chương 7 PDF theo mức độ an toàn sinh học
+ */
+export function getWaterStatusColor(status: StatusLevel | 'empty'): WaterStatusColorSet {
+  switch (status) {
+    case 'critical':
+      return {
+        status: 'critical',
+        color: '#BA1A1A',
+        bgPill: '#FFDAD6',
+        textColor: '#BA1A1A',
+        borderColor: '#BA1A1A',
+        label: 'NGUY HIỂM',
+      };
+    case 'warning':
+      return {
+        status: 'warning',
+        color: '#F59E0B',
+        bgPill: '#FEF3C7',
+        textColor: '#B45309',
+        borderColor: '#F59E0B',
+        label: 'CẦN CHÚ Ý',
+      };
+    case 'unknown':
+    case 'empty':
+      return {
+        status,
+        color: '#64748B',
+        bgPill: '#F1F5F9',
+        textColor: '#64748B',
+        borderColor: '#E2E8F0',
+        label: 'Chưa có dữ liệu',
+      };
+    case 'optimal':
+    default:
+      return {
+        status: 'optimal',
+        color: '#006E2D',
+        bgPill: '#E8F5E9',
+        textColor: '#006E2D',
+        borderColor: '#7CF994',
+        label: 'AN TOÀN',
+      };
+  }
+}
+
+export function getWaterMetricColors(
+  type: WaterMetricType,
+  value: number | null | undefined
+): WaterStatusColorSet {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return getWaterStatusColor('empty');
+  }
+  return getWaterStatusColor(evaluateWaterMetricStatus(type, Number(value)));
 }
 
 export const pondService = {
@@ -106,148 +442,118 @@ export const pondService = {
   },
 
   /**
-   * 11.3. Lấy kết quả cường độ bắt mồi FIS mới nhất theo ao nuôi
-   * Endpoint: GET /camera/ponds/:pondId/latest-fis
-   * Kiểm tra cờ isStale hoặc ageSeconds > 120s
+   * Tổng hợp chỉ số cường độ bắt mồi FIS từ /ponds/:pondId/ai/recommendations/latest
+   * và /ponds/:pondId/feeding-records (không gọi /camera/* gây 404).
    */
   async getLatestFis(pondId: string): Promise<LatestFisResponse> {
-    const normalizeFis = (raw: any): LatestFisResponse | null => {
-      if (!raw || typeof raw !== 'object') return null;
-      const data = raw.data && typeof raw.data === 'object' && 'hasData' in raw.data ? raw.data : raw;
-      if (typeof data.hasData !== 'boolean') return null;
-      if (data.status) {
-        data.status = {
-          ...data.status,
-          fisScore: Number(data.status.fisScore) || 0,
-          appetiteLevel: (Number(data.status.appetiteLevel) || 0) as any,
-          remainingFeedPercent: Number(data.status.remainingFeedPercent) || 0,
-          shrimpDensity: Number(data.status.shrimpDensity) || 0,
-          consumptionVelocity: Number(data.status.consumptionVelocity) || 0,
-          ageSeconds: Number(data.status.ageSeconds) || 0,
-        };
-        if (data.status.ageSeconds > 120) {
-          data.status.isStale = true;
-        }
-      }
-      return data as LatestFisResponse;
-    };
-
-    try {
-      const response = await apiClient.get<any>(Endpoints.camera.latestFis(pondId));
-      const normalized = normalizeFis(response.data);
-      if (normalized) {
-        await Storage.setJSON(`${AppConfig.storageKeys.cachedFis}_${pondId}`, normalized);
-        return normalized;
-      }
-      return { hasData: false, pondId };
-    } catch {
-      const cached = await Storage.getJSON<any>(
-        `${AppConfig.storageKeys.cachedFis}_${pondId}`
-      );
-      const normalized = normalizeFis(cached);
-      if (normalized) {
-        if (normalized.status?.timestamp) {
-          const ageSec = Math.max(
-            0,
-            Math.floor((Date.now() - new Date(normalized.status.timestamp).getTime()) / 1000)
-          );
-          normalized.status.ageSeconds = ageSec;
-          normalized.status.isStale = ageSec > 120;
-        }
-        return normalized;
-      }
-
-      return {
-        hasData: false,
-        pondId,
-      };
-    }
+    return synthesizeFisFromPondData(pondId, false);
   },
 
   /**
-   * 11.1. Phân tích khung hình Camera bằng AI (POST /camera/analyze)
+   * Làm mới đánh giá nhá ăn / FIS tổng hợp từ /ponds/:pondId/ai/recommendations/latest
+   * và /ponds/:pondId/feeding-records (không gọi /camera/analyze gây 404).
    */
   async analyzeCameraFrame(payload: CameraAnalyzePayload): Promise<LatestFisResponse> {
-    const response = await apiClient.post<any>(Endpoints.camera.analyze, payload);
-    const resData = response.data;
-    const summary = resData?.analysisSummary;
-    const log = resData?.data;
-    const mapped: LatestFisResponse = {
-      hasData: true,
-      pondId: payload.pondId,
-      status: {
-        fisScore: Number(summary?.fisScore ?? log?.fisScore ?? 0) || 0,
-        appetiteLevel: (Number(summary?.appetiteLevel ?? log?.appetiteLevel ?? 0) || 0) as any,
-        appetiteLevelDescription: summary?.appetiteLevelDescription ?? 'Chưa xác định',
-        remainingFeedPercent:
-          Number(
-            summary?.feedLeftoverPercent ??
-              (log?.remainingFeedAreaRt !== undefined ? Math.round(Number(log.remainingFeedAreaRt) * 100) : 0)
-          ) || 0,
-        shrimpDensity: Number(summary?.shrimpDensity ?? log?.shrimpDensityDt ?? 0) || 0,
-        consumptionVelocity: Number(summary?.consumptionVelocity ?? log?.feedConsumptionVelocityVt ?? 0) || 0,
-        timestamp: log?.timestamp || new Date().toISOString(),
-        ageSeconds: 1,
-        isStale: false,
-      },
-    };
-    await Storage.setJSON(`${AppConfig.storageKeys.cachedFis}_${payload.pondId}`, mapped);
-    return mapped;
+    return synthesizeFisFromPondData(payload.pondId, true);
   },
 
   /**
    * 12.1. Lấy khuyến nghị AI mới nhất cho ao nuôi
-   * Endpoint: GET /ponds/:pondId/ai/recommendations/latest
+   * Endpoint: GET /ponds/:pondId/ai/recommendations/latest (trả về { recommendation })
    */
   async getLatestAiRecommendation(pondId: string): Promise<AiRecommendation | null> {
-    const normalizeAi = (raw: any): AiRecommendation | null => {
-      if (!raw || typeof raw !== 'object') return null;
-      const item = raw.data && typeof raw.data === 'object' ? raw.data : raw;
-      if (
-        item.predictedFeedAmountKg === undefined ||
-        item.predictedFeedAmountKg === null ||
-        isNaN(Number(item.predictedFeedAmountKg))
-      ) {
-        return null;
-      }
-      return {
-        ...item,
-        predictedFeedAmountKg: Number(item.predictedFeedAmountKg),
-        spreadRateKgPerMinute:
-          item.spreadRateKgPerMinute !== undefined ? Number(item.spreadRateKgPerMinute) : undefined,
-        biomassKg: item.biomassKg !== undefined ? Number(item.biomassKg) : undefined,
-        confidence: item.confidence !== undefined ? Number(item.confidence) : undefined,
-      };
-    };
-
     try {
-      const response = await apiClient.get<any>(
-        Endpoints.ai.recommendationsLatest(pondId)
-      );
-      const normalized = normalizeAi(response.data);
+      const response = await apiClient.get<any>(Endpoints.ai.recommendationsLatest(pondId));
+      const normalized = normalizeAiRecommendation(response.data);
       if (normalized) {
         await Storage.setJSON(`${AppConfig.storageKeys.cachedAiRec}_${pondId}`, normalized);
         return normalized;
       }
       return null;
     } catch {
-      try {
-        // Fallback thử đường dẫn tương thích tài liệu 1 nếu cần
-        const alt = await apiClient.get<any>(
-          Endpoints.ai.legacyRecommendations(pondId)
-        );
-        const normalizedAlt = normalizeAi(alt.data);
-        if (normalizedAlt) {
-          await Storage.setJSON(`${AppConfig.storageKeys.cachedAiRec}_${pondId}`, normalizedAlt);
-          return normalizedAlt;
-        }
-      } catch {
-        // Ignore
+      const cached = await Storage.getJSON<any>(`${AppConfig.storageKeys.cachedAiRec}_${pondId}`);
+      return normalizeAiRecommendation(cached);
+    }
+  },
+
+  /**
+   * 12.2. Dự báo khẩu phần ăn bằng AI theo nhu cầu (POST /ponds/:pondId/ai/predict-feed)
+   */
+  async predictFeedDemand(
+    pondId: string,
+    overrideDto?: PredictFeedOverrideDto
+  ): Promise<PredictFeedResponse> {
+    const response = await apiClient.post<any>(
+      Endpoints.ai.predictFeed(pondId),
+      overrideDto ?? {}
+    );
+    const raw = response.data;
+    const item =
+      raw?.data &&
+      typeof raw.data === 'object' &&
+      ('recommendationId' in raw.data || 'predictedFeedAmountKg' in raw.data)
+        ? raw.data
+        : raw;
+
+    return {
+      recommendationId: String(item?.recommendationId ?? item?.id ?? ''),
+      pondId: String(item?.pondId ?? pondId),
+      predictedFeedAmountKg: Number(item?.predictedFeedAmountKg) || 0,
+      safeAllowedAmountKg: Number(item?.safeAllowedAmountKg ?? item?.predictedFeedAmountKg) || 0,
+      biomassKg: Number(item?.biomassKg) || 0,
+      feedRatePercent: Number(item?.feedRatePercent) || 0,
+      safetyDecision: item?.safetyDecision ?? 'allowed',
+      safetyReasons: Array.isArray(item?.safetyReasons) ? item.safetyReasons : [],
+      explanation: String(item?.explanation ?? ''),
+      createdAt: String(item?.createdAt ?? new Date().toISOString()),
+    };
+  },
+
+  /**
+   * 12.3. Lấy xu hướng dự báo DO & khuyến nghị thích ứng AI (GET /ponds/:pondId/ai/predicted-trends)
+   */
+  async getPredictedTrends(pondId: string): Promise<PredictedTrendsResponse | null> {
+    const normalizeTrends = (raw: any): PredictedTrendsResponse | null => {
+      if (!raw || typeof raw !== 'object') return null;
+      const item =
+        raw?.data &&
+        typeof raw.data === 'object' &&
+        ('currentDo' in raw.data || 'riskLevel' in raw.data || 'predictedDo1h' in raw.data)
+          ? raw.data
+          : raw;
+      if (
+        !item ||
+        typeof item !== 'object' ||
+        (!('riskLevel' in item) && !('currentDo' in item) && !('predictedDo1h' in item))
+      ) {
+        return null;
       }
+      return {
+        pondId: String(item.pondId ?? pondId),
+        currentDo: toNullableNumber(item.currentDo),
+        predictedDo1h: toNullableNumber(item.predictedDo1h),
+        predictedDo2h: toNullableNumber(item.predictedDo2h),
+        riskLevel: String(item.riskLevel ?? 'low'),
+        adaptiveAction: String(item.adaptiveAction ?? ''),
+        decision: item.decision ?? 'allowed',
+        reasons: Array.isArray(item.reasons) ? item.reasons : [],
+        recommendation: normalizeAiRecommendation(item.recommendation),
+      };
+    };
+
+    try {
+      const response = await apiClient.get<any>(Endpoints.ai.predictedTrends(pondId));
+      const normalized = normalizeTrends(response.data);
+      if (normalized) {
+        await Storage.setJSON(`${AppConfig.storageKeys.cachedAiRec}_trends_${pondId}`, normalized);
+        return normalized;
+      }
+      return null;
+    } catch {
       const cached = await Storage.getJSON<any>(
-        `${AppConfig.storageKeys.cachedAiRec}_${pondId}`
+        `${AppConfig.storageKeys.cachedAiRec}_trends_${pondId}`
       );
-      return normalizeAi(cached);
+      return normalizeTrends(cached);
     }
   },
 
@@ -263,10 +569,8 @@ export const pondService = {
         : raw && Array.isArray(raw.data)
         ? raw.data
         : [];
-      const pondDevices = allDevices.filter((d) => !d.pondId || d.pondId === pondId);
-      if (pondDevices.length > 0) {
-        await Storage.setJSON(`${AppConfig.storageKeys.cachedDevices}_${pondId}`, pondDevices);
-      }
+      const pondDevices = allDevices.filter((d) => d.pondId === pondId);
+      await Storage.setJSON(`${AppConfig.storageKeys.cachedDevices}_${pondId}`, pondDevices);
       return pondDevices;
     } catch {
       const cached = await Storage.getJSON<Device[]>(
@@ -313,13 +617,6 @@ export const pondService = {
    * 9.4. Lịch sử nhật ký các lần cho ăn (GET /ponds/:pondId/feeding-records)
    */
   async getFeedingRecords(pondId: string): Promise<FeedingRecord[]> {
-    const normalizeRecords = (items: any[]): FeedingRecord[] =>
-      items.map((rec) => ({
-        ...rec,
-        requestedAmountKg: Number(rec.requestedAmountKg) || 0,
-        actualAmountKg: Number(rec.actualAmountKg) || 0,
-      }));
-
     try {
       const response = await apiClient.get<any>(Endpoints.feedings.records(pondId));
       const raw = response.data;
@@ -328,7 +625,7 @@ export const pondService = {
         : raw && Array.isArray(raw.data)
         ? raw.data
         : [];
-      const normalized = normalizeRecords(list);
+      const normalized = normalizeFeedingRecords(list);
       if (normalized.length > 0) {
         await Storage.setJSON(`${AppConfig.storageKeys.cachedRecords}_${pondId}`, normalized);
       }
@@ -337,7 +634,7 @@ export const pondService = {
       const cached = await Storage.getJSON<any[]>(
         `${AppConfig.storageKeys.cachedRecords}_${pondId}`
       );
-      return Array.isArray(cached) ? normalizeRecords(cached) : [];
+      return Array.isArray(cached) ? normalizeFeedingRecords(cached) : [];
     }
   },
 
@@ -393,9 +690,9 @@ export const pondService = {
         );
         appliedRules.push('PH_CRITICAL_BLOCKED');
       }
-      if (nh3Val > 0.1) {
+      if (nh3Val > 0.3) {
         reasons.push(
-          `Khí độc NH3 (${nh3Val} mg/L) vượt ngưỡng nguy hiểm (> 0.1 mg/L). Cấm xả thức ăn.`
+          `Khí độc NH3 (${nh3Val} mg/L) vượt ngưỡng nguy hiểm (> 0.3 mg/L). Cấm xả thức ăn.`
         );
         appliedRules.push('NH3_CRITICAL_BLOCKED');
       }
