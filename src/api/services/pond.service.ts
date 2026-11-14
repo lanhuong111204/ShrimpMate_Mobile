@@ -471,16 +471,6 @@ export const pondService = {
       }
       return null;
     } catch {
-      try {
-        const alt = await apiClient.get<any>(Endpoints.ai.legacyRecommendations(pondId));
-        const normalizedAlt = normalizeAiRecommendation(alt.data);
-        if (normalizedAlt) {
-          await Storage.setJSON(`${AppConfig.storageKeys.cachedAiRec}_${pondId}`, normalizedAlt);
-          return normalizedAlt;
-        }
-      } catch {
-        // Ignore
-      }
       const cached = await Storage.getJSON<any>(`${AppConfig.storageKeys.cachedAiRec}_${pondId}`);
       return normalizeAiRecommendation(cached);
     }

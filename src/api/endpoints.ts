@@ -11,6 +11,7 @@ export const Endpoints = {
   // 2. Authentication & User Management (/auth)
   auth: {
     login: '/auth/login',
+    logout: '/auth/logout',
     register: '/auth/register',
     refreshToken: '/auth/refresh-token',
     forgotPassword: '/auth/forgot-password',
