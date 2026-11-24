@@ -1,17 +1,36 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Alert } from 'react-native';
 import { useAuth } from '@/context/auth-context';
 import { farmPondService } from '@/api/services/farm-pond.service';
 import { pondService } from '@/api/services/pond.service';
 import { alertService } from '@/api/services/alert.service';
+import {
+  DeviceStatusSocketPayload,
+  FeederStatusSocketPayload,
+  FeedingCompletedSocketPayload,
+  socketService,
+  TelemetrySocketPayload,
+} from '@/api/socket.service';
 import { CreateFarmRequest, Farm } from '@/types/farm';
 import { CreatePondRequest, Pond } from '@/types/pond';
 import { TelemetryReading } from '@/types/telemetry';
-import { AppetiteLevel, LatestFisResponse } from '@/types/camera';
-import { AiRecommendation } from '@/types/ai';
-import { FeedingRecord, FeedingSchedule, FeedingSource } from '@/types/feeding';
+import {
+  AiRecommendation,
+  PredictFeedOverrideDto,
+  PredictFeedResponse,
+  PredictedTrendsResponse,
+} from '@/types/ai';
+import { FeedingRecord, FeedingSchedule, FeedingSource, FeedingStatus } from '@/types/feeding';
 import { EvaluateSafetyResponse } from '@/types/safety-rule';
-import { Device } from '@/types/device';
+import { Device, DeviceMode, DeviceStatus } from '@/types/device';
 import { AlertItem, AlertSummary } from '@/types/alert';
 
 export interface FarmInfo {
@@ -59,6 +78,14 @@ export interface InventoryItem {
   stockStatus?: 'low' | 'normal' | 'good';
 }
 
+export interface QuickFeedResult {
+  success: boolean;
+  evaluation: EvaluateSafetyResponse;
+  record?: FeedingRecord;
+  errorMessage?: string;
+  isSafetyBlocked?: boolean;
+}
+
 interface FarmContextType {
   // 1. Trạng thái Farm & Pond được phân công (UC020, UC021)
   farms: Farm[];
@@ -74,10 +101,10 @@ interface FarmContextType {
   createFarm: (data: CreateFarmRequest) => Promise<Farm>;
   createPond: (data: CreatePondRequest) => Promise<Pond>;
 
-  // 2. Dữ liệu thời gian thực của Ao đang chọn (Telemetry 6 Gauges, Camera FIS, AI, Devices, Alerts)
+  // 2. Dữ liệu thời gian thực của Ao đang chọn (Telemetry 6 Gauges, AI, Devices, Alerts)
   latestTelemetry: TelemetryReading | null;
-  latestFis: LatestFisResponse | null;
   latestAiRecommendation: AiRecommendation | null;
+  predictedTrends: PredictedTrendsResponse | null;
   pondDevices: Device[];
   feederDevice: Device | null;
   feedingSchedules: FeedingSchedule[];
@@ -95,7 +122,10 @@ interface FarmContextType {
     source?: FeedingSource,
     scheduleId?: string,
     note?: string
-  ) => Promise<{ success: boolean; evaluation: EvaluateSafetyResponse; record?: FeedingRecord }>;
+  ) => Promise<QuickFeedResult>;
+  requestAiFeedPrediction: (
+    overrideDto?: PredictFeedOverrideDto
+  ) => Promise<PredictFeedResponse | null>;
   acknowledgeAlert: (alertId: string) => Promise<void>;
   resolveAlert: (alertId: string) => Promise<void>;
 
@@ -119,13 +149,6 @@ interface FarmContextType {
   inventory: InventoryItem[];
   dispenseFeedBag: (itemId: string, kg?: number) => void;
   addInventoryItem: (item: Omit<InventoryItem, 'id'>) => void;
-  appetiteLevel: 'weak' | 'strong' | 'skip';
-  fisAppetiteLevel: AppetiteLevel;
-  setAppetiteLevel: (level: 'weak' | 'strong' | 'skip') => void;
-  setFisAppetiteLevel: (level: AppetiteLevel) => void;
-  trayCleanPercent: number;
-  isScanningTray: boolean;
-  scanTray: () => Promise<void>;
 }
 
 const initialFarmInfo: FarmInfo = {
@@ -135,16 +158,41 @@ const initialFarmInfo: FarmInfo = {
   selectedPond: '',
 };
 
-const initialMeals: FeedingMeal[] = [];
-
-const initialInventory: InventoryItem[] = [];
-
 function getPeriodFromTime(timeOfDay: string): 'Sáng' | 'Trưa' | 'Chiều' | 'Tối' {
   const hour = parseInt(timeOfDay.split(':')[0] || '8', 10);
   if (hour < 10) return 'Sáng';
   if (hour < 14) return 'Trưa';
   if (hour < 18) return 'Chiều';
   return 'Tối';
+}
+
+function computeAlertSummaryFromList(items: AlertItem[]): AlertSummary {
+  const open = items.filter((a) => !a.status || a.status === 'open').length;
+  const acknowledged = items.filter((a) => a.status === 'acknowledged').length;
+  const resolved = items.filter((a) => a.status === 'resolved').length;
+  const critical = items.filter(
+    (a) => (a.severity === 3 || a.severity === 'critical') && a.status !== 'resolved'
+  ).length;
+  const warning = items.filter(
+    (a) => (a.severity === 2 || a.severity === 'warning') && a.status !== 'resolved'
+  ).length;
+  const monitoring = items.filter(
+    (a) =>
+      (a.severity === 1 || a.severity === 'monitoring' || a.severity === 'info') &&
+      a.status !== 'resolved'
+  ).length;
+
+  return {
+    total: items.length,
+    open,
+    acknowledged,
+    resolved,
+    bySeverity: {
+      critical,
+      warning,
+      monitoring,
+    },
+  };
 }
 
 const FarmContext = createContext<FarmContextType | undefined>(undefined);
@@ -163,12 +211,16 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
 
   // Trạng thái vận hành thực tế theo ao đang chọn
   const [latestTelemetry, setLatestTelemetry] = useState<TelemetryReading | null>(null);
-  const [latestFis, setLatestFis] = useState<LatestFisResponse | null>(null);
-  const [latestAiRecommendation, setLatestAiRecommendation] = useState<AiRecommendation | null>(null);
+  const [latestAiRecommendation, setLatestAiRecommendation] = useState<AiRecommendation | null>(
+    null
+  );
+  const [predictedTrends, setPredictedTrends] = useState<PredictedTrendsResponse | null>(null);
   const [pondDevices, setPondDevices] = useState<Device[]>([]);
   const [feedingSchedules, setFeedingSchedules] = useState<FeedingSchedule[]>([]);
   const [feedingRecords, setFeedingRecords] = useState<FeedingRecord[]>([]);
-  const [lastSafetyEvaluation, setLastSafetyEvaluation] = useState<EvaluateSafetyResponse | null>(null);
+  const [lastSafetyEvaluation, setLastSafetyEvaluation] = useState<EvaluateSafetyResponse | null>(
+    null
+  );
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [alertSummary, setAlertSummary] = useState<AlertSummary | null>(null);
   const [isRefreshingPondData, setIsRefreshingPondData] = useState<boolean>(false);
@@ -183,26 +235,90 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
   const [feederRadius, setFeederRadius] = useState<'3m' | '6m' | '9m'>('6m');
   const [hopperKg, setHopperKg] = useState<number>(0);
   const [isEmergencyStopped, setIsEmergencyStopped] = useState<boolean>(false);
-  const [appetiteLevel, setAppetiteLevelState] = useState<'weak' | 'strong' | 'skip'>('strong');
-  const [fisAppetiteLevel, setFisAppetiteLevelState] = useState<AppetiteLevel>(0);
-  const [trayCleanPercent, setTrayCleanPercent] = useState<number>(0);
-  const [isScanningTray, setIsScanningTray] = useState<boolean>(false);
 
-  const feederDevice: Device | null =
-    pondDevices.find((d) => d.type === 'feeder') || pondDevices[0] || null;
+  // Refs chống race condition và stale closure cho WebSocket
+  const fetchSeqRef = useRef(0);
+  const selectedPondIdRef = useRef<string | null>(null);
+  const pondDevicesRef = useRef<Device[]>([]);
+  const latestTelemetryRef = useRef<TelemetryReading | null>(null);
+  const alertsRef = useRef<AlertItem[]>([]);
+  const dispensedKgRef = useRef<number>(0);
+  const seenAlertIdsRef = useRef<Set<string>>(new Set());
+  const seenAlertEventKeysRef = useRef<Set<string>>(new Set());
+  const seenCompletedIdsRef = useRef<Set<string>>(new Set());
+
+  const feederDevice: Device | null = useMemo(
+    () => pondDevices.find((d) => d.type === 'feeder') || null,
+    [pondDevices]
+  );
+
+  useEffect(() => {
+    selectedPondIdRef.current = selectedPond?.id ?? null;
+  }, [selectedPond?.id]);
+
+  useEffect(() => {
+    pondDevicesRef.current = pondDevices;
+  }, [pondDevices]);
+
+  useEffect(() => {
+    latestTelemetryRef.current = latestTelemetry;
+  }, [latestTelemetry]);
+
+  useEffect(() => {
+    alertsRef.current = alerts;
+  }, [alerts]);
+
+  useEffect(() => {
+    dispensedKgRef.current = dispensedKg;
+  }, [dispensedKg]);
+
+  const clearPondOperationalState = useCallback(() => {
+    fetchSeqRef.current += 1;
+    latestTelemetryRef.current = null;
+    alertsRef.current = [];
+    dispensedKgRef.current = 0;
+    setLatestTelemetry(null);
+    setLatestAiRecommendation(null);
+    setPredictedTrends(null);
+    setPondDevices([]);
+    setFeedingSchedules([]);
+    setFeedingRecords([]);
+    setFeedMeals([]);
+    setLastSafetyEvaluation(null);
+    setAlerts([]);
+    setAlertSummary(null);
+    setDispensedKg(0);
+    setTargetKg(0);
+    setHopperKg(0);
+    setFeederPaused(false);
+    setIsEmergencyStopped(false);
+  }, []);
 
   /**
    * Nạp toàn bộ dữ liệu vận hành thời gian thực cho một Ao nuôi cụ thể
    */
-  const loadPondOperationalData = useCallback(async (pondId: string) => {
-    if (!pondId) return;
-    setIsRefreshingPondData(true);
-    try {
-      const [telemetry, fis, aiRec, devices, schedules, records, pondAlerts, summary] =
-        await Promise.all([
+  const loadPondOperationalData = useCallback(
+    async (pondId: string, options?: { silent?: boolean }) => {
+      if (!pondId) return;
+      const seq = ++fetchSeqRef.current;
+      if (!options?.silent) {
+        setIsRefreshingPondData(true);
+      }
+
+      try {
+        const [
+          telemetry,
+          aiRec,
+          trends,
+          devices,
+          schedules,
+          records,
+          pondAlerts,
+          summary,
+        ] = await Promise.all([
           pondService.getLatestTelemetry(pondId),
-          pondService.getLatestFis(pondId),
           pondService.getLatestAiRecommendation(pondId),
+          pondService.getPredictedTrends(pondId).catch(() => null),
           pondService.getDevicesByPond(pondId),
           pondService.getFeedingSchedules(pondId),
           pondService.getFeedingRecords(pondId),
@@ -210,141 +326,154 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
           alertService.getAlertSummary(pondId),
         ]);
 
-      // 1. Cập nhật Telemetry 6 chỉ số
-      setLatestTelemetry(telemetry);
-      if (telemetry) {
-        setFarmInfo((prev) => ({
-          ...prev,
-          waterTemp: telemetry.temperatureC,
-          dissolvedOxygen: telemetry.dissolvedOxygenMgL,
-          ph: telemetry.ph,
-          salinity: telemetry.salinityPpt,
-          nh3: telemetry.ammoniaMgL,
-          turbidity: telemetry.turbidityNtu,
-          measuredAt: telemetry.measuredAt,
-        }));
-      } else {
-        setFarmInfo((prev) => ({
-          ...prev,
-          waterTemp: undefined,
-          dissolvedOxygen: undefined,
-          ph: undefined,
-          salinity: undefined,
-          nh3: undefined,
-          turbidity: undefined,
-          measuredAt: undefined,
-        }));
-      }
+        // Race condition guard: bỏ qua kết quả cũ nếu người dùng đã chuyển ao khác
+        if (seq !== fetchSeqRef.current) return;
 
-      // 2. Cập nhật Camera FIS & Stale Check
-      setLatestFis(fis);
-      if (fis && fis.hasData && fis.status) {
-        const cleanPct = Math.max(0, Math.min(100, Math.round(100 - fis.status.remainingFeedPercent)));
-        setTrayCleanPercent(cleanPct);
-        setFisAppetiteLevelState(fis.status.appetiteLevel);
-        if (fis.status.appetiteLevel === 0) {
-          setAppetiteLevelState('skip');
-        } else if (fis.status.appetiteLevel === 1) {
-          setAppetiteLevelState('weak');
+        // 1. Cập nhật Telemetry 6 chỉ số
+        latestTelemetryRef.current = telemetry;
+        setLatestTelemetry(telemetry);
+        if (telemetry) {
+          setFarmInfo((prev) => ({
+            ...prev,
+            waterTemp: telemetry.temperatureC,
+            dissolvedOxygen: telemetry.dissolvedOxygenMgL,
+            ph: telemetry.ph,
+            salinity: telemetry.salinityPpt,
+            nh3: telemetry.ammoniaMgL,
+            turbidity: telemetry.turbidityNtu,
+            measuredAt: telemetry.measuredAt,
+          }));
         } else {
-          setAppetiteLevelState('strong');
+          setFarmInfo((prev) => ({
+            ...prev,
+            waterTemp: undefined,
+            dissolvedOxygen: undefined,
+            ph: undefined,
+            salinity: undefined,
+            nh3: undefined,
+            turbidity: undefined,
+            measuredAt: undefined,
+          }));
         }
-      } else {
-        setTrayCleanPercent(0);
-        setFisAppetiteLevelState(0);
-      }
 
-      // 3. Cập nhật Khuyến nghị AI
-      setLatestAiRecommendation(aiRec);
+        // 2. Cập nhật Khuyến nghị AI & Xu hướng DO
+        setLatestAiRecommendation(aiRec);
+        setPredictedTrends(trends);
 
-      // 4. Cập nhật Thiết bị IoT & trạng thái Emergency Stop
-      setPondDevices(devices);
-      const feeder = devices.find((d) => d.type === 'feeder');
-      if (feeder) {
-        setIsEmergencyStopped(feeder.mode === 'emergency_stop');
-        if (feeder.metadata?.hopperCapacityKg && typeof feeder.metadata.hopperCapacityKg === 'number') {
-          setHopperKg(Math.min(150, feeder.metadata.hopperCapacityKg));
+        // 3. Cập nhật Thiết bị IoT, Hopper & trạng thái Emergency Stop
+        setPondDevices(devices);
+        const feeder = devices.find((d) => d.type === 'feeder');
+        if (feeder) {
+          setIsEmergencyStopped(feeder.mode === 'emergency_stop');
+          setFeederPaused(feeder.mode === 'manual' || feeder.mode === 'emergency_stop');
+          const rawHopper = feeder.metadata?.hopperKg ?? feeder.metadata?.hopperCapacityKg;
+          if (rawHopper !== undefined && rawHopper !== null && !isNaN(Number(rawHopper))) {
+            setHopperKg(Math.min(150, Number(rawHopper)));
+          } else {
+            setHopperKg(0);
+          }
+        } else {
+          setIsEmergencyStopped(false);
+          setFeederPaused(false);
+          setHopperKg(0);
         }
-      } else {
-        setIsEmergencyStopped(false);
-        setHopperKg(0);
-      }
 
-      // 5. Cập nhật Lịch ăn & Nhật ký cho ăn
-      setFeedingSchedules(schedules);
-      setFeedingRecords(records);
+        // 4. Cập nhật Lịch ăn & Nhật ký cho ăn
+        setFeedingSchedules(schedules);
+        setFeedingRecords(records);
 
-      if (schedules.length > 0) {
-        const mappedMeals: FeedingMeal[] = schedules.map((sch, idx) => {
-          const matchingRecord = records.find((r) => r.scheduleId === sch.id);
-          const isRunning = matchingRecord?.status === 'running';
-          const isDone = matchingRecord?.status === 'completed';
-          const period = getPeriodFromTime(sch.timeOfDay);
-          const isAiSlot = idx === schedules.length - 2 || period === 'Chiều';
-          return {
-            id: sch.id,
-            time: sch.timeOfDay,
-            name: sch.name || `Cữ ${idx + 1} (${period})`,
-            period,
-            status: isRunning
-              ? 'active'
-              : isDone
-              ? 'completed'
-              : isAiSlot && aiRec
-              ? 'ai_suggested'
-              : 'pending',
-            feedType: 'Cám số 2 hạt nổi (Grobest)',
-            targetKg: Number(sch.feedAmountKg) || 0,
-            dispensedKg: matchingRecord
-              ? Number(matchingRecord.actualAmountKg) || 0
-              : isDone
-              ? Number(sch.feedAmountKg) || 0
-              : 0,
-            speedKgPerMin: sch.spreadRateKgPerMinute !== undefined ? Number(sch.spreadRateKgPerMinute) || 0 : undefined,
-            aiSuggestedKg: isAiSlot && aiRec ? Number(aiRec.predictedFeedAmountKg) || 0 : undefined,
-            notes: matchingRecord?.safetyReason || (sch.isEnabled ? 'Lịch tự động đang bật' : 'Tạm ngưng'),
-          };
+        if (schedules.length > 0) {
+          const mappedMeals: FeedingMeal[] = schedules.map((sch, idx) => {
+            const matchingRecord = records.find((r) => r.scheduleId === sch.id);
+            const isRunning = matchingRecord?.status === 'running';
+            const isDone = matchingRecord?.status === 'completed';
+            const period = getPeriodFromTime(sch.timeOfDay);
+            const isAiSlot = idx === schedules.length - 2 || period === 'Chiều';
+            return {
+              id: sch.id,
+              time: sch.timeOfDay,
+              name: sch.name || `Cữ ${idx + 1} (${period})`,
+              period,
+              status: isRunning
+                ? 'active'
+                : isDone
+                ? 'completed'
+                : isAiSlot && aiRec
+                ? 'ai_suggested'
+                : 'pending',
+              feedType: 'Cám số 2 hạt nổi (Grobest)',
+              targetKg: Number(sch.feedAmountKg) || 0,
+              dispensedKg: matchingRecord
+                ? Number(matchingRecord.actualAmountKg) || 0
+                : isDone
+                ? Number(sch.feedAmountKg) || 0
+                : 0,
+              speedKgPerMin:
+                sch.spreadRateKgPerMinute !== undefined
+                  ? Number(sch.spreadRateKgPerMinute) || 0
+                  : undefined,
+              aiSuggestedKg: isAiSlot && aiRec ? Number(aiRec.predictedFeedAmountKg) || 0 : undefined,
+              notes:
+                matchingRecord?.safetyReason ||
+                (sch.isEnabled ? 'Lịch tự động đang bật' : 'Tạm ngưng'),
+            };
+          });
+          setFeedMeals(mappedMeals);
+        } else {
+          setFeedMeals([]);
+        }
+
+        const activeRec = records.find((r) => r.status === 'running') || records[0];
+        if (activeRec) {
+          const nextDispensed = Number(activeRec.actualAmountKg) || 0;
+          dispensedKgRef.current = nextDispensed;
+          setDispensedKg(nextDispensed);
+          setTargetKg(Number(activeRec.requestedAmountKg) || 0);
+        } else {
+          dispensedKgRef.current = 0;
+          setDispensedKg(0);
+          setTargetKg(0);
+        }
+
+        // 5. Cảnh báo (ghi nhận ID đã tải để deduplicate sự kiện WebSocket)
+        pondAlerts.forEach((a) => {
+          if (a.id) {
+            seenAlertIdsRef.current.add(a.id);
+            seenAlertEventKeysRef.current.add(`${a.id}:${a.status ?? 'open'}`);
+          }
         });
-        setFeedMeals(mappedMeals);
-      } else {
-        setFeedMeals([]);
-      }
+        alertsRef.current = pondAlerts;
+        setAlerts(pondAlerts);
+        setAlertSummary(summary);
 
-      const activeRec = records.find((r) => r.status === 'running') || records[0];
-      if (activeRec) {
-        setDispensedKg(Number(activeRec.actualAmountKg) || 0);
-        setTargetKg(Number(activeRec.requestedAmountKg) || 0);
-      } else {
-        setDispensedKg(0);
-        setTargetKg(0);
-      }
-
-      // 6. Đánh giá trước Safety Rule nếu có chỉ số nước và thiết bị
-      if (telemetry && feeder) {
-        try {
-          const safetyEval = await pondService.evaluateSafetyBeforeFeed(
-            pondId,
-            {
-              deviceId: feeder.id,
-              requestedAmountKg: 15.0,
-            },
-            telemetry
-          );
-          setLastSafetyEvaluation(safetyEval);
-        } catch {
+        // 6. Đánh giá trước Safety Rule nếu có chỉ số nước
+        if (telemetry) {
+          try {
+            const safetyEval = await pondService.evaluateSafetyBeforeFeed(
+              pondId,
+              {
+                ...(feeder?.id ? { deviceId: feeder.id } : {}),
+                requestedAmountKg: 15.0,
+              },
+              telemetry
+            );
+            if (seq !== fetchSeqRef.current) return;
+            setLastSafetyEvaluation(safetyEval);
+          } catch {
+            if (seq !== fetchSeqRef.current) return;
+            setLastSafetyEvaluation(null);
+          }
+        } else {
           setLastSafetyEvaluation(null);
         }
-      } else {
-        setLastSafetyEvaluation(null);
+      } finally {
+        if (seq === fetchSeqRef.current && !options?.silent) {
+          setIsRefreshingPondData(false);
+        }
       }
-
-      // 7. Cảnh báo
-      setAlerts(pondAlerts);
-      setAlertSummary(summary);
-    } finally {
-      setIsRefreshingPondData(false);
-    }
-  }, []);
+    },
+    []
+  );
 
   /**
    * Tải toàn bộ danh sách Farms và Ponds khi người dùng đăng nhập
@@ -355,6 +484,7 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
       setSelectedFarm(null);
       setPonds([]);
       setSelectedPond(null);
+      clearPondOperationalState();
       setIsLoadingFarms(false);
       setIsLoadingPonds(false);
       return;
@@ -398,14 +528,7 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
             await loadPondOperationalData(currentPond.id);
           } else {
             setSelectedPond(null);
-            setLatestTelemetry(null);
-            setLatestFis(null);
-            setLatestAiRecommendation(null);
-            setPondDevices([]);
-            setFeedingSchedules([]);
-            setFeedingRecords([]);
-            setAlerts([]);
-            setAlertSummary(null);
+            clearPondOperationalState();
             setFarmInfo((prev) => ({
               ...prev,
               farmerName: user?.fullName || prev.farmerName,
@@ -421,14 +544,7 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
         setSelectedFarm(null);
         setPonds([]);
         setSelectedPond(null);
-        setLatestTelemetry(null);
-        setLatestFis(null);
-        setLatestAiRecommendation(null);
-        setPondDevices([]);
-        setFeedingSchedules([]);
-        setFeedingRecords([]);
-        setAlerts([]);
-        setAlertSummary(null);
+        clearPondOperationalState();
         setFarmInfo((prev) => ({
           ...prev,
           farmerName: user?.fullName || prev.farmerName,
@@ -441,109 +557,388 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoadingFarms(false);
     }
-  }, [isAuthenticated, user?.id, loadPondOperationalData]);
+  }, [isAuthenticated, user?.id, user?.fullName, loadPondOperationalData, clearPondOperationalState]);
 
   useEffect(() => {
     loadFarmsAndPonds();
   }, [loadFarmsAndPonds]);
 
-  const selectFarm = async (farmId: string) => {
-    const targetFarm = farms.find((f) => f.id === farmId);
-    if (!targetFarm) return;
-
-    setSelectedFarm(targetFarm);
-    await farmPondService.setSelectedFarmId(targetFarm.id);
-
-    setIsLoadingPonds(true);
-    try {
-      const pondsList = await farmPondService.getPondsByFarm(
-        targetFarm.id,
-        undefined,
-        user?.id
-      );
-      setPonds(pondsList);
-
-      if (pondsList.length > 0) {
-        const firstPond = pondsList[0];
-        setSelectedPond(firstPond);
-        await farmPondService.setSelectedPondId(firstPond.id);
-
-        setFarmInfo((prev) => ({
-          ...prev,
-          farmName: targetFarm.name,
-          location: targetFarm.address || prev.location,
-          selectedPond: firstPond.name || firstPond.code,
-        }));
-
-        await loadPondOperationalData(firstPond.id);
-      } else {
-        setSelectedPond(null);
-      }
-    } catch (err: any) {
-      setFarmError(err?.message || 'Không thể tải danh sách ao nuôi');
-    } finally {
-      setIsLoadingPonds(false);
+  // Kết nối WebSocket thời gian thực khi đã đăng nhập trực tuyến
+  useEffect(() => {
+    if (!isAuthenticated || isOfflineMode) {
+      socketService.disconnect();
+      return;
     }
-  };
 
-  const selectPond = (pondId: string) => {
-    const targetPond = ponds.find((p) => p.id === pondId);
-    if (!targetPond) return;
+    socketService.connect();
+    if (selectedPondIdRef.current) {
+      socketService.joinPond(selectedPondIdRef.current);
+    }
 
-    setSelectedPond(targetPond);
-    farmPondService.setSelectedPondId(targetPond.id);
+    const unsubTelemetry = socketService.onTelemetry((payload: TelemetrySocketPayload) => {
+      if (!payload || payload.pondId !== selectedPondIdRef.current) return;
 
-    setFarmInfo((prev) => ({
-      ...prev,
-      selectedPond: targetPond.name || targetPond.code,
-    }));
+      const prev = latestTelemetryRef.current;
+      const nextReading: TelemetryReading = {
+        id: String(payload.readingId ?? payload.id ?? prev?.id ?? `ws-${Date.now()}`),
+        pondId: String(payload.pondId),
+        deviceId: String(payload.deviceId ?? prev?.deviceId ?? ''),
+        measuredAt: String(payload.measuredAt ?? payload.emittedAt ?? new Date().toISOString()),
+        ph:
+          payload.ph !== undefined && payload.ph !== null
+            ? Number(payload.ph)
+            : (prev?.ph ?? 0),
+        dissolvedOxygenMgL:
+          payload.dissolvedOxygenMgL !== undefined && payload.dissolvedOxygenMgL !== null
+            ? Number(payload.dissolvedOxygenMgL)
+            : payload.do !== undefined && payload.do !== null
+            ? Number(payload.do)
+            : (prev?.dissolvedOxygenMgL ?? 0),
+        temperatureC:
+          payload.temperatureC !== undefined && payload.temperatureC !== null
+            ? Number(payload.temperatureC)
+            : payload.temperature !== undefined && payload.temperature !== null
+            ? Number(payload.temperature)
+            : (prev?.temperatureC ?? 0),
+        salinityPpt:
+          payload.salinityPpt !== undefined && payload.salinityPpt !== null
+            ? Number(payload.salinityPpt)
+            : payload.salinity !== undefined && payload.salinity !== null
+            ? Number(payload.salinity)
+            : (prev?.salinityPpt ?? 0),
+        ammoniaMgL:
+          payload.ammoniaMgL !== undefined && payload.ammoniaMgL !== null
+            ? Number(payload.ammoniaMgL)
+            : payload.nh3 !== undefined && payload.nh3 !== null
+            ? Number(payload.nh3)
+            : (prev?.ammoniaMgL ?? 0),
+        turbidityNtu:
+          payload.turbidityNtu !== undefined && payload.turbidityNtu !== null
+            ? Number(payload.turbidityNtu)
+            : payload.turbidity !== undefined && payload.turbidity !== null
+            ? Number(payload.turbidity)
+            : (prev?.turbidityNtu ?? 0),
+      };
 
-    loadPondOperationalData(targetPond.id);
-  };
+      latestTelemetryRef.current = nextReading;
+      setLatestTelemetry(nextReading);
+      setFarmInfo((info) => ({
+        ...info,
+        waterTemp: nextReading.temperatureC,
+        dissolvedOxygen: nextReading.dissolvedOxygenMgL,
+        ph: nextReading.ph,
+        salinity: nextReading.salinityPpt,
+        nh3: nextReading.ammoniaMgL,
+        turbidity: nextReading.turbidityNtu,
+        measuredAt: nextReading.measuredAt,
+      }));
+    });
 
-  const refreshFarmsAndPonds = async () => {
+    const unsubFeederStatus = socketService.onFeederStatus(
+      (payload: FeederStatusSocketPayload) => {
+        const currentPondId = selectedPondIdRef.current;
+        if (!payload || !currentPondId) return;
+
+        if (payload.pondId && payload.pondId !== 'all' && payload.pondId !== currentPondId) {
+          return;
+        }
+        if (payload.pondId === 'all' && payload.deviceUid) {
+          const belongsToPond = pondDevicesRef.current.some(
+            (d) => d.deviceUid === payload.deviceUid
+          );
+          if (!belongsToPond) return;
+        }
+
+        const isEmergencyCmd =
+          payload.command === 'STOP' || payload.command === 'EMERGENCY_STOP';
+        if (payload.mode || isEmergencyCmd) {
+          const nextMode = (isEmergencyCmd ? 'emergency_stop' : payload.mode) as DeviceMode;
+          setPondDevices((prev) =>
+            prev.map((d) => {
+              const matches =
+                (payload.deviceId && d.id === payload.deviceId) ||
+                (payload.deviceUid && d.deviceUid === payload.deviceUid) ||
+                d.type === 'feeder';
+              if (!matches) return d;
+              return {
+                ...d,
+                mode: nextMode,
+                ...(payload.status && ['online', 'offline', 'error', 'maintenance'].includes(payload.status)
+                  ? { status: payload.status as DeviceStatus }
+                  : {}),
+              };
+            })
+          );
+          setIsEmergencyStopped(nextMode === 'emergency_stop');
+          setFeederPaused(nextMode === 'manual' || nextMode === 'emergency_stop');
+        }
+
+        if (payload.recordId) {
+          const nextStatus = payload.status as FeedingStatus | undefined;
+          setFeedingRecords((prev) => {
+            const idx = prev.findIndex((r) => r.id === payload.recordId);
+            if (idx === -1) return prev;
+            const updated: FeedingRecord = {
+              ...prev[idx],
+              ...(nextStatus ? { status: nextStatus } : {}),
+              ...(payload.actualAmountKg !== undefined && payload.actualAmountKg !== null
+                ? { actualAmountKg: Number(payload.actualAmountKg) }
+                : {}),
+              ...(payload.stoppedReason !== undefined
+                ? { stoppedReason: payload.stoppedReason }
+                : {}),
+              ...(payload.safetyDecision
+                ? { safetyDecision: payload.safetyDecision as FeedingRecord['safetyDecision'] }
+                : {}),
+            };
+            const copy = [...prev];
+            copy[idx] = updated;
+            return copy;
+          });
+
+          if (payload.actualAmountKg !== undefined && payload.actualAmountKg !== null) {
+            const nextDispensed = Number(payload.actualAmountKg) || 0;
+            dispensedKgRef.current = nextDispensed;
+            setDispensedKg(nextDispensed);
+          }
+        }
+      }
+    );
+
+    const unsubDeviceStatus = socketService.onDeviceStatus(
+      (payload: DeviceStatusSocketPayload) => {
+        if (!payload) return;
+        if (payload.pondId && payload.pondId !== selectedPondIdRef.current) return;
+
+        const matchesDevice = (d: Device) =>
+          d.id === payload.deviceId ||
+          (Boolean(payload.deviceUid) && d.deviceUid === payload.deviceUid);
+
+        const matchedFeeder = pondDevicesRef.current.find(
+          (d) => d.type === 'feeder' && matchesDevice(d)
+        );
+
+        setPondDevices((prev) =>
+          prev.map((d) => {
+            if (!matchesDevice(d)) return d;
+            return {
+              ...d,
+              ...(payload.status ? { status: payload.status as DeviceStatus } : {}),
+              ...(payload.mode ? { mode: payload.mode as DeviceMode } : {}),
+              ...(payload.lastSeenAt !== undefined ? { lastSeenAt: payload.lastSeenAt } : {}),
+            };
+          })
+        );
+
+        if (matchedFeeder && payload.mode) {
+          setIsEmergencyStopped(payload.mode === 'emergency_stop');
+          setFeederPaused(
+            payload.mode === 'manual' || payload.mode === 'emergency_stop'
+          );
+        }
+      }
+    );
+
+    const unsubFeedingCompleted = socketService.onFeedingCompleted(
+      (payload: FeedingCompletedSocketPayload) => {
+        if (!payload || payload.pondId !== selectedPondIdRef.current) return;
+        const dedupeKey = String(payload.recordId || payload.emittedAt || '');
+        if (dedupeKey) {
+          if (seenCompletedIdsRef.current.has(dedupeKey)) return;
+          if (seenCompletedIdsRef.current.size > 200) {
+            seenCompletedIdsRef.current.clear();
+          }
+          seenCompletedIdsRef.current.add(dedupeKey);
+        }
+        void loadPondOperationalData(payload.pondId, { silent: true });
+      }
+    );
+
+    const unsubAlertNew = socketService.onAlertNew((alert: AlertItem) => {
+      if (!alert || !alert.id || alert.pondId !== selectedPondIdRef.current) return;
+
+      const eventKey = `${alert.id}:${alert.status ?? 'open'}`;
+      if (seenAlertEventKeysRef.current.has(eventKey)) {
+        return;
+      }
+      if (seenAlertEventKeysRef.current.size > 500) {
+        seenAlertEventKeysRef.current.clear();
+      }
+      seenAlertEventKeysRef.current.add(eventKey);
+
+      const isBrandNewAlert = !seenAlertIdsRef.current.has(alert.id);
+      if (seenAlertIdsRef.current.size > 500) {
+        seenAlertIdsRef.current.clear();
+      }
+      seenAlertIdsRef.current.add(alert.id);
+
+      const prevAlerts = alertsRef.current;
+      const existingIndex = prevAlerts.findIndex((a) => a.id === alert.id);
+      let nextAlerts: AlertItem[];
+      if (existingIndex !== -1) {
+        nextAlerts = [...prevAlerts];
+        nextAlerts[existingIndex] = { ...prevAlerts[existingIndex], ...alert };
+      } else {
+        nextAlerts = [alert, ...prevAlerts];
+      }
+      alertsRef.current = nextAlerts;
+      setAlerts(nextAlerts);
+      setAlertSummary(computeAlertSummaryFromList(nextAlerts));
+
+      // Không phát âm thanh / popup cảnh báo nếu là bản tin đệm khi mất kết nối (isBuffered)
+      if (isBrandNewAlert && alert.isBuffered !== true) {
+        Alert.alert(
+          alert.title || '⚠️ Cảnh Báo Ao Nuôi',
+          alert.message || 'Phát hiện cảnh báo mới tại ao nuôi.'
+        );
+      }
+    });
+
+    return () => {
+      unsubTelemetry();
+      unsubFeederStatus();
+      unsubDeviceStatus();
+      unsubFeedingCompleted();
+      unsubAlertNew();
+      socketService.disconnect();
+    };
+  }, [isAuthenticated, isOfflineMode, loadPondOperationalData]);
+
+  // Tham gia room WebSocket theo ao đang chọn
+  useEffect(() => {
+    const pondId = selectedPond?.id ?? null;
+    if (!isAuthenticated || isOfflineMode) return;
+    if (pondId) {
+      socketService.joinPond(pondId);
+    } else {
+      socketService.leavePond();
+    }
+  }, [isAuthenticated, isOfflineMode, selectedPond?.id]);
+
+  const selectFarm = useCallback(
+    async (farmId: string) => {
+      const targetFarm = farms.find((f) => f.id === farmId);
+      if (!targetFarm) return;
+
+      setSelectedFarm(targetFarm);
+      await farmPondService.setSelectedFarmId(targetFarm.id);
+
+      setIsLoadingPonds(true);
+      try {
+        const pondsList = await farmPondService.getPondsByFarm(
+          targetFarm.id,
+          undefined,
+          user?.id
+        );
+        setPonds(pondsList);
+
+        if (pondsList.length > 0) {
+          const firstPond = pondsList[0];
+          setSelectedPond(firstPond);
+          await farmPondService.setSelectedPondId(firstPond.id);
+
+          setFarmInfo((prev) => ({
+            ...prev,
+            farmName: targetFarm.name,
+            location: targetFarm.address || prev.location,
+            selectedPond: firstPond.name || firstPond.code,
+          }));
+
+          await loadPondOperationalData(firstPond.id);
+        } else {
+          setSelectedPond(null);
+          clearPondOperationalState();
+        }
+      } catch (err: any) {
+        setFarmError(err?.message || 'Không thể tải danh sách ao nuôi');
+      } finally {
+        setIsLoadingPonds(false);
+      }
+    },
+    [farms, user?.id, loadPondOperationalData, clearPondOperationalState]
+  );
+
+  const selectPond = useCallback(
+    (pondId: string) => {
+      const targetPond = ponds.find((p) => p.id === pondId);
+      if (!targetPond) return;
+
+      setSelectedPond(targetPond);
+      void farmPondService.setSelectedPondId(targetPond.id);
+
+      setFarmInfo((prev) => ({
+        ...prev,
+        selectedPond: targetPond.name || targetPond.code,
+      }));
+
+      void loadPondOperationalData(targetPond.id);
+    },
+    [ponds, loadPondOperationalData]
+  );
+
+  const refreshFarmsAndPonds = useCallback(async () => {
     await loadFarmsAndPonds();
-  };
+  }, [loadFarmsAndPonds]);
 
-  const refreshPondOperationalData = async () => {
+  const refreshPondOperationalData = useCallback(async () => {
     if (selectedPond?.id) {
       await loadPondOperationalData(selectedPond.id);
     }
-  };
+  }, [selectedPond?.id, loadPondOperationalData]);
 
-  const createFarm = async (data: CreateFarmRequest): Promise<Farm> => {
-    const newFarm = await farmPondService.createFarm(data);
-    setFarms((prev) => [newFarm, ...prev]);
-    await selectFarm(newFarm.id);
-    return newFarm;
-  };
+  const createFarm = useCallback(
+    async (data: CreateFarmRequest): Promise<Farm> => {
+      const newFarm = await farmPondService.createFarm(data);
+      setFarms((prev) => [newFarm, ...prev]);
+      await selectFarm(newFarm.id);
+      return newFarm;
+    },
+    [selectFarm]
+  );
 
-  const createPond = async (data: CreatePondRequest): Promise<Pond> => {
-    if (!selectedFarm) {
-      throw new Error('Vui lòng chọn trang trại trước khi thêm ao');
-    }
-    const newPond = await farmPondService.createPond(selectedFarm.id, data);
-    setPonds((prev) => [newPond, ...prev]);
-    selectPond(newPond.id);
-    return newPond;
-  };
+  const createPond = useCallback(
+    async (data: CreatePondRequest): Promise<Pond> => {
+      if (!selectedFarm) {
+        throw new Error('Vui lòng chọn trang trại trước khi thêm ao');
+      }
+      const newPond = await farmPondService.createPond(selectedFarm.id, data);
+      setPonds((prev) => [newPond, ...prev]);
+      selectPond(newPond.id);
+      return newPond;
+    },
+    [selectedFarm, selectPond]
+  );
 
   /**
    * Đánh giá an toàn trước khi cho ăn (POST /ponds/:pondId/safety-rules/evaluate)
    */
-  const evaluateSafetyBeforeFeed = async (
-    requestedAmountKg: number
-  ): Promise<EvaluateSafetyResponse> => {
-    const pondId = selectedPond?.id || 'pond-1';
-    const deviceId = feederDevice?.id || '22fffa98-46eb-4606-93a0-faae9f70691e';
-    const evalResult = await pondService.evaluateSafetyBeforeFeed(
-      pondId,
-      { deviceId, requestedAmountKg },
-      latestTelemetry
-    );
-    setLastSafetyEvaluation(evalResult);
-    return evalResult;
-  };
+  const evaluateSafetyBeforeFeed = useCallback(
+    async (requestedAmountKg: number): Promise<EvaluateSafetyResponse> => {
+      if (!selectedPond?.id) {
+        const blockedResult: EvaluateSafetyResponse = {
+          decision: 'blocked',
+          allowedAmountKg: 0,
+          requestedAmountKg,
+          reasons: ['Chưa chọn ao nuôi hợp lệ.'],
+          appliedRules: [],
+        };
+        setLastSafetyEvaluation(blockedResult);
+        return blockedResult;
+      }
+
+      const evalResult = await pondService.evaluateSafetyBeforeFeed(
+        selectedPond.id,
+        {
+          ...(feederDevice?.id ? { deviceId: feederDevice.id } : {}),
+          requestedAmountKg,
+        },
+        latestTelemetry
+      );
+      setLastSafetyEvaluation(evalResult);
+      return evalResult;
+    },
+    [selectedPond?.id, feederDevice?.id, latestTelemetry]
+  );
 
   /**
    * Luồng Cho ăn nhanh (Quick Feed) có khóa bảo vệ qua Safety Rule Engine:
@@ -551,183 +946,285 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
    * 2. Nếu blocked -> chặn xả cám & báo lỗi vi phạm an toàn sinh học
    * 3. Nếu adjusted / allowed -> gọi POST /ponds/:pondId/feeding-records
    */
-  const triggerQuickFeed = async (
-    requestedAmountKg: number,
-    source: FeedingSource = 'manual',
-    scheduleId?: string,
-    note?: string
-  ): Promise<{ success: boolean; evaluation: EvaluateSafetyResponse; record?: FeedingRecord }> => {
-    const pondId = selectedPond?.id || 'pond-1';
-    const deviceId = feederDevice?.id || '22fffa98-46eb-4606-93a0-faae9f70691e';
+  const triggerQuickFeed = useCallback(
+    async (
+      requestedAmountKg: number,
+      source: FeedingSource = 'manual',
+      scheduleId?: string,
+      note?: string
+    ): Promise<QuickFeedResult> => {
+      if (!selectedPond?.id) {
+        return {
+          success: false,
+          evaluation: {
+            decision: 'blocked',
+            allowedAmountKg: 0,
+            requestedAmountKg,
+            reasons: ['Chưa chọn ao nuôi hợp lệ.'],
+            appliedRules: [],
+          },
+          errorMessage: 'Chưa chọn ao nuôi hợp lệ.',
+        };
+      }
 
-    const evaluation = await evaluateSafetyBeforeFeed(requestedAmountKg);
+      const evaluation = await evaluateSafetyBeforeFeed(requestedAmountKg);
 
-    if (evaluation.decision === 'blocked') {
-      return { success: false, evaluation };
-    }
+      if (evaluation.decision === 'blocked') {
+        return {
+          success: false,
+          evaluation,
+          isSafetyBlocked: true,
+          errorMessage:
+            evaluation.reasons.join('; ') ||
+            'Chỉ số môi trường nước vượt ngưỡng nguy hiểm. Cấm xả cám!',
+        };
+      }
 
-    const finalKg =
-      evaluation.decision === 'adjusted' ? evaluation.allowedAmountKg : requestedAmountKg;
+      const finalKg =
+        evaluation.decision === 'adjusted' ? evaluation.allowedAmountKg : requestedAmountKg;
 
-    try {
-      const record = await pondService.triggerFeedingRecord(pondId, {
-        deviceId,
-        scheduleId,
-        requestedAmountKg: finalKg,
-        source,
-      });
+      try {
+        const record = await pondService.triggerFeedingRecord(selectedPond.id, {
+          ...(feederDevice?.id ? { deviceId: feederDevice.id } : {}),
+          scheduleId,
+          requestedAmountKg: finalKg,
+          source,
+        });
 
-      setFeedingRecords((prev) => [record, ...prev]);
-      setDispensedKg((prev) => Number((prev + finalKg).toFixed(1)));
-      setTargetKg((prev) => Math.max(prev, Number((dispensedKg + finalKg).toFixed(1))));
+        setFeedingRecords((prev) => [record, ...prev]);
 
-      const newMeal: FeedingMeal = {
-        id: record.id || `meal-quick-${Date.now()}`,
-        time: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-        name: `Cữ Cho Ăn Nhanh (${finalKg}kg)`,
-        period: getPeriodFromTime(
-          new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
-        ),
-        status: record.status === 'stopped' ? 'pending' : 'active',
-        feedType: 'Cám số 2 hạt nổi (Quick Feed)',
-        targetKg: finalKg,
-        dispensedKg: record.actualAmountKg || finalKg,
-        notes:
-          note ||
-          (evaluation.decision === 'adjusted'
-            ? `Đã điều chỉnh an toàn từ ${requestedAmountKg}kg xuống ${finalKg}kg`
-            : 'Đã kiểm duyệt qua Safety Rule Engine (Allowed)'),
-      };
-      setFeedMeals((prev) => [newMeal, ...prev]);
+        if (record.safetyDecision === 'blocked' || record.status === 'stopped') {
+          return {
+            success: false,
+            evaluation,
+            record,
+            isSafetyBlocked: true,
+            errorMessage:
+              record.safetyReason ||
+              record.stoppedReason ||
+              evaluation.reasons.join('; ') ||
+              'Cữ cho ăn đã bị chặn bởi Safety Rule Engine.',
+          };
+        }
 
-      return { success: true, evaluation, record };
-    } catch {
-      // Fallback lưu cữ ăn khi ngoại tuyến bờ ao
-      const fallbackRecord: FeedingRecord = {
-        id: `rec-offline-${Date.now()}`,
-        pondId,
-        deviceId,
-        startedAt: new Date().toISOString(),
-        requestedAmountKg,
-        actualAmountKg: finalKg,
-        source,
-        status: 'running',
-        safetyDecision: evaluation.decision,
-        safetyReason: evaluation.reasons[0] || null,
-      };
-      setFeedingRecords((prev) => [fallbackRecord, ...prev]);
-      setDispensedKg((prev) => Number((prev + finalKg).toFixed(1)));
+        const nextDispensed = Number((dispensedKgRef.current + finalKg).toFixed(1));
+        dispensedKgRef.current = nextDispensed;
+        setDispensedKg(nextDispensed);
+        setTargetKg((prevTarget) => Math.max(prevTarget, nextDispensed));
 
-      const newMeal: FeedingMeal = {
-        id: fallbackRecord.id,
-        time: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-        name: `Cữ Cho Ăn Nhanh (${finalKg}kg)`,
-        period: 'Chiều',
-        status: 'active',
-        feedType: 'Cám số 2 hạt nổi (Quick Feed)',
-        targetKg: finalKg,
-        dispensedKg: finalKg,
-        notes:
-          note ||
-          (evaluation.decision === 'adjusted'
-            ? `Đã điều chỉnh an toàn xuống ${finalKg}kg`
-            : 'Đã kiểm duyệt Safety Rule Engine'),
-      };
-      setFeedMeals((prev) => [newMeal, ...prev]);
+        const newMeal: FeedingMeal = {
+          id: record.id || `meal-quick-${Date.now()}`,
+          time: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+          name: `Cữ Cho Ăn Nhanh (${finalKg}kg)`,
+          period: getPeriodFromTime(
+            new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+          ),
+          status: 'active',
+          feedType: 'Cám số 2 hạt nổi (Quick Feed)',
+          targetKg: finalKg,
+          dispensedKg: Number(record.actualAmountKg) || finalKg,
+          notes:
+            note ||
+            (evaluation.decision === 'adjusted'
+              ? `Đã điều chỉnh an toàn từ ${requestedAmountKg}kg xuống ${finalKg}kg`
+              : 'Đã kiểm duyệt qua Safety Rule Engine (Allowed)'),
+        };
+        setFeedMeals((prev) => [newMeal, ...prev]);
 
-      return { success: true, evaluation, record: fallbackRecord };
-    }
-  };
+        return { success: true, evaluation, record };
+      } catch (err: any) {
+        const statusCode = err?.statusCode || err?.response?.status;
+        const errorMessage = err?.message || 'Không thể gửi lệnh cho ăn tới máy chủ.';
+        return {
+          success: false,
+          evaluation,
+          errorMessage,
+          isSafetyBlocked: statusCode === 422,
+        };
+      }
+    },
+    [selectedPond?.id, feederDevice?.id, evaluateSafetyBeforeFeed]
+  );
 
-  const updateFarmInfo = (info: Partial<FarmInfo>) => {
+  /**
+   * Yêu cầu AI dự báo khẩu phần ăn mới (POST /ponds/:pondId/ai/predict-feed)
+   */
+  const requestAiFeedPrediction = useCallback(
+    async (overrideDto?: PredictFeedOverrideDto): Promise<PredictFeedResponse | null> => {
+      if (!selectedPond?.id) return null;
+      try {
+        const res = await pondService.predictFeedDemand(selectedPond.id, overrideDto);
+        const mappedRec: AiRecommendation = {
+          id: res.recommendationId,
+          pondId: res.pondId,
+          modelName: res.modelName || 'XGBoost-Regressor',
+          modelVersion: res.modelVersion || 'v2.0.0',
+          predictedFeedAmountKg: res.predictedFeedAmountKg,
+          safeAllowedAmountKg: res.safeAllowedAmountKg,
+          baseValueKg: res.baseValueKg ?? null,
+          biomassKg: res.biomassKg ?? null,
+          feedRatePercent: res.feedRatePercent ?? null,
+          safetyDecision: res.safetyDecision,
+          safetyReason: res.safetyReasons?.length > 0 ? res.safetyReasons.join('; ') : null,
+          safetyReasons: res.safetyReasons,
+          explanation: res.explanation,
+          featureContributions: res.featureContributions,
+          inputSnapshot: res.inputSnapshot,
+          createdAt: res.createdAt,
+        };
+        setLatestAiRecommendation(mappedRec);
+        return res;
+      } catch {
+        return null;
+      }
+    },
+    [selectedPond?.id]
+  );
+
+  const updateFarmInfo = useCallback((info: Partial<FarmInfo>) => {
     setFarmInfo((prev) => ({ ...prev, ...info }));
-  };
+  }, []);
 
-  const updateFeedMeal = (id: string, updates: Partial<FeedingMeal>) => {
+  const updateFeedMeal = useCallback((id: string, updates: Partial<FeedingMeal>) => {
     setFeedMeals((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m)));
-  };
+  }, []);
 
-  const addExtraMeal = async (kg: number, note: string) => {
-    const result = await triggerQuickFeed(kg, 'manual', undefined, note);
-    if (!result.success) {
+  const addExtraMeal = useCallback(
+    async (kg: number, note: string) => {
+      const result = await triggerQuickFeed(kg, 'manual', undefined, note);
+      if (!result.success) {
+        const isBlocked = result.isSafetyBlocked || result.evaluation.decision === 'blocked';
+        Alert.alert(
+          isBlocked ? '⛔ KHÓA AN TOÀN SINH HỌC (BLOCKED)' : '❌ KHÔNG THỂ GỬI LỆNH CHO ĂN',
+          result.errorMessage ||
+            result.evaluation.reasons.join('\n') ||
+            'Không thể gửi lệnh cho ăn tới máy chủ.'
+        );
+        return;
+      }
+      if (result.evaluation.decision === 'adjusted') {
+        Alert.alert(
+          '⚠️ ĐÃ ĐIỀU CHỈNH LƯỢNG CÁM AN TOÀN',
+          `${result.evaluation.reasons.join('\n')}\n\nKhẩu phần thực tế được phép xả: ${result.evaluation.allowedAmountKg} kg.`
+        );
+        return;
+      }
       Alert.alert(
-        '⛔ KHÓA AN TOÀN SINH HỌC (BLOCKED)',
-        result.evaluation.reasons.join('\n') ||
-          'Chỉ số môi trường nước vượt ngưỡng nguy hiểm. Hệ thống chặn xả cám để bảo vệ đàn tôm.'
+        'Cho Ăn Nhanh Thành Công',
+        `Đã kiểm duyệt Safety Rule Engine và phát lệnh xả ${kg} kg cám cho ao ${selectedPond?.name || ''}!`
+      );
+    },
+    [triggerQuickFeed, selectedPond?.name]
+  );
+
+  const toggleFeederPause = useCallback(async () => {
+    if (!selectedPond?.id || !feederDevice?.id) {
+      Alert.alert(
+        'Chưa Có Thiết Bị',
+        'Ao chưa được gán máy cho ăn nên không thể thay đổi chế độ vận hành.'
       );
       return;
     }
-    if (result.evaluation.decision === 'adjusted') {
-      Alert.alert(
-        '⚠️ ĐÃ ĐIỀU CHỈNH LƯỢNG CÁM AN TOÀN',
-        `${result.evaluation.reasons.join('\n')}\n\nKhẩu phần thực tế được phép xả: ${result.evaluation.allowedAmountKg} kg.`
-      );
-      return;
-    }
-    Alert.alert(
-      'Cho Ăn Nhanh Thành Công',
-      `Đã kiểm duyệt Safety Rule Engine và phát lệnh xả ${kg} kg cám cho ao ${selectedPond?.name || ''}!`
-    );
-  };
 
-  const toggleFeederPause = async () => {
     const nextPaused = !feederPaused;
-    const deviceId = feederDevice?.id || '22fffa98-46eb-4606-93a0-faae9f70691e';
+    const nextMode: DeviceMode = nextPaused ? 'manual' : 'automatic';
     try {
-      await pondService.updateDeviceMode(deviceId, nextPaused ? 'manual' : 'automatic');
-    } catch {
-      // Fallback offline
+      await pondService.updateDeviceMode(feederDevice.id, nextMode);
+      setPondDevices((prev) =>
+        prev.map((d) => (d.id === feederDevice.id ? { ...d, mode: nextMode } : d))
+      );
+      setFeederPaused(nextPaused);
+      Alert.alert(
+        nextPaused ? 'Tạm Dừng Máy Ăn' : 'Tiếp Tục Chu Kỳ Tự Động',
+        nextPaused
+          ? 'Đã chuyển máy cho ăn sang chế độ Thủ công (Tạm dừng chu kỳ rải tự động).'
+          : 'Đã chuyển máy cho ăn về chế độ Tự động (Automatic).'
+      );
+    } catch (err: any) {
+      Alert.alert(
+        'Lỗi Điều Khiển Máy Ăn',
+        err?.message || 'Không thể cập nhật chế độ máy cho ăn tới máy chủ.'
+      );
     }
-    setFeederPaused(nextPaused);
-    Alert.alert(
-      nextPaused ? 'Tạm Dừng Máy Ăn' : 'Tiếp Tục Chu Kỳ Tự Động',
-      nextPaused
-        ? 'Đã chuyển máy cho ăn sang chế độ Thủ công (Tạm dừng chu kỳ rải tự động).'
-        : 'Đã chuyển máy cho ăn về chế độ Tự động (Automatic).'
-    );
-  };
+  }, [selectedPond?.id, feederDevice?.id, feederPaused]);
 
-  const addFeederKg = async (kg: number) => {
-    await addExtraMeal(kg, `Bổ sung nhanh +${kg}kg tại bờ ao`);
-  };
+  const addFeederKg = useCallback(
+    async (kg: number) => {
+      await addExtraMeal(kg, `Bổ sung nhanh +${kg}kg tại bờ ao`);
+    },
+    [addExtraMeal]
+  );
 
   /**
    * Emergency Stop 1 chạm (POST /devices/:id/emergency-stop)
    */
-  const triggerEmergencyStop = async () => {
-    const deviceId = feederDevice?.id || '22fffa98-46eb-4606-93a0-faae9f70691e';
-    setIsEmergencyStopped(true);
-    setFeederPaused(true);
+  const triggerEmergencyStop = useCallback(async () => {
+    if (!selectedPond?.id || !feederDevice?.id) {
+      Alert.alert(
+        'Chưa Có Thiết Bị',
+        'Ao chưa được gán máy cho ăn nên không thể kích hoạt dừng khẩn cấp.'
+      );
+      return;
+    }
+
     try {
-      await pondService.triggerEmergencyStop(deviceId);
+      await pondService.triggerEmergencyStop(feederDevice.id);
+      setIsEmergencyStopped(true);
+      setFeederPaused(true);
+      setPondDevices((prev) =>
+        prev.map((d) => (d.id === feederDevice.id ? { ...d, mode: 'emergency_stop' } : d))
+      );
       Alert.alert(
         '🚨 DỪNG KHẨN CẤP THÀNH CÔNG',
-        `Đã gửi lệnh POST /devices/${deviceId}/emergency-stop ngắt động cơ máy cho ăn tức thì qua MQTT!`
+        `Đã gửi lệnh POST /devices/${feederDevice.id}/emergency-stop ngắt động cơ máy cho ăn tức thì qua MQTT!`
       );
-    } catch {
-      Alert.alert(
-        '🚨 DỪNG KHẨN CẤP THÀNH CÔNG',
-        'Đã kích hoạt ngắt khẩn cấp máy cho ăn tại bờ ao (mode = emergency_stop).'
-      );
-    }
-  };
+    } catch (err: any) {
+      const statusCode = err?.statusCode || err?.response?.status;
+      const errMsg = err?.message || 'Không thể kết nối tới máy chủ để kích hoạt dừng khẩn cấp.';
+      // Chỉ đánh dấu emergency_stop nếu Backend đã xác nhận lưu DB nhưng MQTT gặp sự cố (502/503 từ BE)
+      const isMqttDownAfterDbSave =
+        statusCode === 502 ||
+        (statusCode === 503 && (Boolean(err?.details) || /mqtt|csdl/i.test(errMsg)));
 
-  const resetEmergencyStop = async () => {
-    const deviceId = feederDevice?.id || '22fffa98-46eb-4606-93a0-faae9f70691e';
+      if (isMqttDownAfterDbSave) {
+        setIsEmergencyStopped(true);
+        setFeederPaused(true);
+        setPondDevices((prev) =>
+          prev.map((d) => (d.id === feederDevice.id ? { ...d, mode: 'emergency_stop' } : d))
+        );
+        Alert.alert('⚠️ ĐÃ KHÓA TRÊN HỆ THỐNG (LỖI MQTT)', errMsg);
+      } else {
+        Alert.alert('❌ DỪNG KHẨN CẤP THẤT BẠI', errMsg);
+      }
+    }
+  }, [selectedPond?.id, feederDevice?.id]);
+
+  const resetEmergencyStop = useCallback(async () => {
+    if (!selectedPond?.id || !feederDevice?.id) {
+      Alert.alert('Chưa Có Thiết Bị', 'Ao chưa được gán máy cho ăn.');
+      return;
+    }
+
     try {
-      await pondService.updateDeviceMode(deviceId, 'automatic');
-    } catch {
-      // Fallback offline
+      await pondService.updateDeviceMode(feederDevice.id, 'automatic');
+      setIsEmergencyStopped(false);
+      setFeederPaused(false);
+      setPondDevices((prev) =>
+        prev.map((d) => (d.id === feederDevice.id ? { ...d, mode: 'automatic' } : d))
+      );
+      Alert.alert(
+        'Khôi Phục Trạng Thái Máy Ăn',
+        'Đã chuyển chế độ máy ăn từ emergency_stop về automatic. Sẵn sàng vận hành.'
+      );
+    } catch (err: any) {
+      Alert.alert(
+        'Lỗi Khôi Phục Máy Ăn',
+        err?.message || 'Không thể kết nối tới máy chủ để khôi phục chế độ tự động.'
+      );
     }
-    setIsEmergencyStopped(false);
-    setFeederPaused(false);
-    Alert.alert(
-      'Khôi Phục Trạng Thái Máy Ăn',
-      'Đã chuyển chế độ máy ăn từ emergency_stop về automatic. Sẵn sàng vận hành.'
-    );
-  };
+  }, [selectedPond?.id, feederDevice?.id]);
 
-  const dispenseFeedBag = (itemId: string, kg = 25) => {
+  const dispenseFeedBag = useCallback((itemId: string, kg = 25) => {
     setInventory((prev) =>
       prev.map((item) => {
         if (item.id === itemId && item.stockCount > 0) {
@@ -745,164 +1242,159 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
       'Xuất Kho Thành Công',
       `Đã xuất 1 bao (${kg}kg) và nạp trực tiếp vào Thùng Cám Hopper máy ăn!`
     );
-  };
+  }, []);
 
-  const addInventoryItem = (item: Omit<InventoryItem, 'id'>) => {
+  const addInventoryItem = useCallback((item: Omit<InventoryItem, 'id'>) => {
     const newItem: InventoryItem = {
       ...item,
       id: `inv-${Date.now()}`,
     };
     setInventory((prev) => [newItem, ...prev]);
     Alert.alert('Thành Công', `Đã nhập thêm "${item.name}" vào kho hàng!`);
-  };
-
-  const setAppetiteLevel = (level: 'weak' | 'strong' | 'skip') => {
-    setAppetiteLevelState(level);
-    if (level === 'skip') setFisAppetiteLevelState(0);
-    else if (level === 'weak') setFisAppetiteLevelState(1);
-    else setFisAppetiteLevelState(3);
-  };
-
-  const setFisAppetiteLevel = (level: AppetiteLevel) => {
-    setFisAppetiteLevelState(level);
-    if (level === 0) setAppetiteLevelState('skip');
-    else if (level === 1) setAppetiteLevelState('weak');
-    else setAppetiteLevelState('strong');
-  };
-
-  /**
-   * Quét sàng ăn bằng Camera AI (POST /camera/analyze & GET /camera/ponds/:pondId/latest-fis)
-   */
-  const scanTray = async () => {
-    const pondId = selectedPond?.id || 'pond-1';
-    const camDevice = pondDevices.find((d) => d.type === 'camera') || feederDevice;
-    setIsScanningTray(true);
-    try {
-      const analyzed = await pondService.analyzeCameraFrame({
-        pondId,
-        deviceId: camDevice?.id || '22fffa98-46eb-4606-93a0-faae9f70691e',
-        timeDeltaSeconds: 20,
-      });
-      setLatestFis(analyzed);
-      if (analyzed.status) {
-        const cleanPct = Math.max(
-          0,
-          Math.min(100, Math.round(100 - analyzed.status.remainingFeedPercent))
-        );
-        setTrayCleanPercent(cleanPct);
-        setFisAppetiteLevel(analyzed.status.appetiteLevel);
-        Alert.alert(
-          'AI Phân Tích Sàng Ăn Hoàn Tất',
-          `• Điểm FIS: ${analyzed.status.fisScore.toFixed(2)} (${analyzed.status.appetiteLevelDescription})\n• Thức ăn còn dư: ${analyzed.status.remainingFeedPercent}%\n• Mật độ tôm trên sàng: ${analyzed.status.shrimpDensity} con`
-        );
-      }
-    } catch {
-      // Nếu endpoint POST /camera/analyze không khả dụng khi offline, làm mới GET latest-fis
-      const latest = await pondService.getLatestFis(pondId);
-      if (latest.status) {
-        latest.status.ageSeconds = 5;
-        latest.status.isStale = false;
-        latest.status.timestamp = new Date().toISOString();
-      }
-      setLatestFis({ ...latest });
-      setTrayCleanPercent(94);
-      setFisAppetiteLevel(3);
-      Alert.alert(
-        'Đồng Bộ Camera FIS Thành Công',
-        `Đã cập nhật dữ liệu sàng ăn mới nhất: FIS = ${latest.status?.fisScore ?? 0.82} (Mức ${latest.status?.appetiteLevel ?? 3}).`
-      );
-    } finally {
-      setIsScanningTray(false);
-    }
-  };
+  }, []);
 
   /**
    * Xác nhận đã tiếp nhận cảnh báo (PATCH /alerts/:id/acknowledge)
    */
-  const acknowledgeAlert = async (alertId: string) => {
-    await alertService.acknowledgeAlert(alertId);
-    const now = new Date().toISOString();
-    setAlerts((prev) =>
-      prev.map((a) => (a.id === alertId ? { ...a, status: 'acknowledged', acknowledgedAt: now } : a))
-    );
-    const summary = await alertService.getAlertSummary(selectedPond?.id);
-    setAlertSummary(summary);
-  };
+  const acknowledgeAlert = useCallback(
+    async (alertId: string) => {
+      await alertService.acknowledgeAlert(alertId);
+      const now = new Date().toISOString();
+      seenAlertEventKeysRef.current.add(`${alertId}:acknowledged`);
+      setAlerts((prev) => {
+        const next = prev.map((a) =>
+          a.id === alertId ? { ...a, status: 'acknowledged', acknowledgedAt: now } : a
+        );
+        return next;
+      });
+      const summary = await alertService.getAlertSummary(selectedPond?.id);
+      setAlertSummary(summary);
+    },
+    [selectedPond?.id]
+  );
 
   /**
    * Xác nhận đã khắc phục sự cố ngoài bờ ao (PATCH /alerts/:id/resolve)
    */
-  const resolveAlert = async (alertId: string) => {
-    await alertService.resolveAlert(alertId);
-    const now = new Date().toISOString();
-    setAlerts((prev) =>
-      prev.map((a) => (a.id === alertId ? { ...a, status: 'resolved', resolvedAt: now } : a))
-    );
-    const summary = await alertService.getAlertSummary(selectedPond?.id);
-    setAlertSummary(summary);
-  };
-
-  return (
-    <FarmContext.Provider
-      value={{
-        farms,
-        selectedFarm,
-        ponds,
-        selectedPond,
-        isLoadingFarms,
-        isLoadingPonds,
-        farmError,
-        selectFarm,
-        selectPond,
-        refreshFarmsAndPonds,
-        createFarm,
-        createPond,
-        latestTelemetry,
-        latestFis,
-        latestAiRecommendation,
-        pondDevices,
-        feederDevice,
-        feedingSchedules,
-        feedingRecords,
-        lastSafetyEvaluation,
-        alerts,
-        alertSummary,
-        isRefreshingPondData,
-        refreshPondOperationalData,
-        evaluateSafetyBeforeFeed,
-        triggerQuickFeed,
-        acknowledgeAlert,
-        resolveAlert,
-        farmInfo,
-        updateFarmInfo,
-        feedMeals,
-        updateFeedMeal,
-        addExtraMeal,
-        dispensedKg,
-        targetKg,
-        feederPaused,
-        feederRadius,
-        hopperKg,
-        isEmergencyStopped,
-        toggleFeederPause,
-        addFeederKg,
-        setFeederRadius,
-        triggerEmergencyStop,
-        resetEmergencyStop,
-        inventory,
-        dispenseFeedBag,
-        addInventoryItem,
-        appetiteLevel,
-        fisAppetiteLevel,
-        setAppetiteLevel,
-        setFisAppetiteLevel,
-        trayCleanPercent,
-        isScanningTray,
-        scanTray,
-      }}>
-      {children}
-    </FarmContext.Provider>
+  const resolveAlert = useCallback(
+    async (alertId: string) => {
+      await alertService.resolveAlert(alertId);
+      const now = new Date().toISOString();
+      seenAlertEventKeysRef.current.add(`${alertId}:resolved`);
+      setAlerts((prev) =>
+        prev.map((a) =>
+          a.id === alertId ? { ...a, status: 'resolved', resolvedAt: now } : a
+        )
+      );
+      const summary = await alertService.getAlertSummary(selectedPond?.id);
+      setAlertSummary(summary);
+    },
+    [selectedPond?.id]
   );
+
+  const contextValue = useMemo<FarmContextType>(
+    () => ({
+      farms,
+      selectedFarm,
+      ponds,
+      selectedPond,
+      isLoadingFarms,
+      isLoadingPonds,
+      farmError,
+      selectFarm,
+      selectPond,
+      refreshFarmsAndPonds,
+      createFarm,
+      createPond,
+      latestTelemetry,
+      latestAiRecommendation,
+      predictedTrends,
+      pondDevices,
+      feederDevice,
+      feedingSchedules,
+      feedingRecords,
+      lastSafetyEvaluation,
+      alerts,
+      alertSummary,
+      isRefreshingPondData,
+      refreshPondOperationalData,
+      evaluateSafetyBeforeFeed,
+      triggerQuickFeed,
+      requestAiFeedPrediction,
+      acknowledgeAlert,
+      resolveAlert,
+      farmInfo,
+      updateFarmInfo,
+      feedMeals,
+      updateFeedMeal,
+      addExtraMeal,
+      dispensedKg,
+      targetKg,
+      feederPaused,
+      feederRadius,
+      hopperKg,
+      isEmergencyStopped,
+      toggleFeederPause,
+      addFeederKg,
+      setFeederRadius,
+      triggerEmergencyStop,
+      resetEmergencyStop,
+      inventory,
+      dispenseFeedBag,
+      addInventoryItem,
+    }),
+    [
+      farms,
+      selectedFarm,
+      ponds,
+      selectedPond,
+      isLoadingFarms,
+      isLoadingPonds,
+      farmError,
+      selectFarm,
+      selectPond,
+      refreshFarmsAndPonds,
+      createFarm,
+      createPond,
+      latestTelemetry,
+      latestAiRecommendation,
+      predictedTrends,
+      pondDevices,
+      feederDevice,
+      feedingSchedules,
+      feedingRecords,
+      lastSafetyEvaluation,
+      alerts,
+      alertSummary,
+      isRefreshingPondData,
+      refreshPondOperationalData,
+      evaluateSafetyBeforeFeed,
+      triggerQuickFeed,
+      requestAiFeedPrediction,
+      acknowledgeAlert,
+      resolveAlert,
+      farmInfo,
+      updateFarmInfo,
+      feedMeals,
+      updateFeedMeal,
+      addExtraMeal,
+      dispensedKg,
+      targetKg,
+      feederPaused,
+      feederRadius,
+      hopperKg,
+      isEmergencyStopped,
+      toggleFeederPause,
+      addFeederKg,
+      triggerEmergencyStop,
+      resetEmergencyStop,
+      inventory,
+      dispenseFeedBag,
+      addInventoryItem,
+    ]
+  );
+
+  return <FarmContext.Provider value={contextValue}>{children}</FarmContext.Provider>;
 }
 
 export function useFarm() {

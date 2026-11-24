@@ -43,6 +43,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Đăng ký lắng nghe sự kiện hết hạn phiên đăng nhập từ ApiClient (401 refresh failed)
     const unsubscribeSession = apiClient.onSessionExpired(() => {
+      void Promise.all([
+        Storage.removeItem(AppConfig.storageKeys.authToken),
+        Storage.removeItem(AppConfig.storageKeys.refreshToken),
+        Storage.removeItem(AppConfig.storageKeys.userData),
+      ]);
       setUser(null);
     });
 

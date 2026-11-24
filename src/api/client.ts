@@ -290,7 +290,7 @@ class ApiClient {
   }
 
   /**
-   * Phương thức tải tệp/ảnh Multipart (FormData) chuyên dụng cho Camera FIS và Avatar
+   * Phương thức tải tệp/ảnh Multipart (FormData) chuyên dụng cho Avatar
    */
   upload<T>(endpoint: string, formData: FormData, options?: Omit<RequestOptions, 'method' | 'body'>) {
     return this.request<T>(endpoint, {

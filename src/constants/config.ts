@@ -32,7 +32,6 @@ export const AppConfig = {
     cachedFarms: '@shrimpmate_cached_farms',
     cachedPonds: '@shrimpmate_cached_ponds',
     cachedTelemetry: '@shrimpmate_cached_telemetry',
-    cachedFis: '@shrimpmate_cached_fis',
     cachedAiRec: '@shrimpmate_cached_ai_rec',
     cachedSchedules: '@shrimpmate_cached_schedules',
     cachedRecords: '@shrimpmate_cached_records',

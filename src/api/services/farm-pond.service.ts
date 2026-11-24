@@ -52,12 +52,18 @@ export const farmPondService = {
       if (farms.length === 0) {
         const assignments = await farmerService.getMyAssignments(userId);
         if (assignments.length > 0) {
-          const farmMap = new Map<string, Farm>();
+          const uniqueFarms = new Map<string, any>();
           for (const assign of assignments as any[]) {
             const fId = assign.farmId || assign.farm?.id;
-            if (fId && !farmMap.has(fId)) {
+            if (fId && !uniqueFarms.has(fId)) {
+              uniqueFarms.set(fId, assign);
+            }
+          }
+
+          const resolvedFarms = await Promise.all(
+            Array.from(uniqueFarms.entries()).map(async ([fId, assign]): Promise<Farm> => {
               if (assign.farm && typeof assign.farm === 'object') {
-                farmMap.set(fId, {
+                return {
                   id: fId,
                   ownerId: assign.farm.ownerId || assign.assignedBy || '',
                   name: assign.farm.name || assign.farmName || 'Trang trại được phân công',
@@ -65,31 +71,31 @@ export const farmPondService = {
                   status: assign.farm.status || 'active',
                   createdAt: assign.farm.createdAt || assign.createdAt || new Date().toISOString(),
                   updatedAt: assign.farm.updatedAt || new Date().toISOString(),
-                });
-              } else {
-                try {
-                  const detailRes = await apiClient.get<any>(Endpoints.farms.detail(fId));
-                  const fData = detailRes.data?.data || detailRes.data;
-                  if (fData && fData.id) {
-                    farmMap.set(fId, fData as Farm);
-                    continue;
-                  }
-                } catch {
-                  // Ignore và tạo từ metadata của assignment
-                }
-                farmMap.set(fId, {
-                  id: fId,
-                  ownerId: assign.assignedBy || '',
-                  name: assign.farmName || 'Trang trại được phân công',
-                  address: assign.farmAddress || '',
-                  status: 'active',
-                  createdAt: assign.createdAt || assign.assignedAt || new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                });
+                };
               }
-            }
-          }
-          farms = Array.from(farmMap.values());
+
+              try {
+                const detailRes = await apiClient.get<any>(Endpoints.farms.detail(fId));
+                const fData = detailRes.data?.data || detailRes.data;
+                if (fData && fData.id) {
+                  return fData as Farm;
+                }
+              } catch {
+                // Ignore và tạo từ metadata của assignment
+              }
+
+              return {
+                id: fId,
+                ownerId: assign.assignedBy || '',
+                name: assign.farmName || 'Trang trại được phân công',
+                address: assign.farmAddress || '',
+                status: 'active',
+                createdAt: assign.createdAt || assign.assignedAt || new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              };
+            })
+          );
+          farms = resolvedFarms;
         }
       }
 
@@ -176,47 +182,52 @@ export const farmPondService = {
           (a: any) => !a.farmId || a.farmId === farmId || a.farm?.id === farmId
         );
 
-        const pondMap = new Map<string, Pond>();
+        const uniquePonds = new Map<string, any>();
         for (const assign of farmAssignments as any[]) {
           const pId = assign.pondId || assign.pond?.id;
-          if (pId && !pondMap.has(pId)) {
-            if (assign.pond && typeof assign.pond === 'object') {
-              pondMap.set(pId, {
-                id: pId,
-                farmId: assign.farmId || farmId,
-                code: assign.pond.code || 'AO-01',
-                name: assign.pond.name || assign.pondName || 'Ao nuôi được phân công',
-                areaM2: Number(assign.pond.areaM2) || 3000,
-                status: assign.pond.status || 'active',
-                createdAt: assign.pond.createdAt || assign.createdAt || new Date().toISOString(),
-                updatedAt: assign.pond.updatedAt || new Date().toISOString(),
-              });
-            } else {
+          if (pId && !uniquePonds.has(pId)) {
+            uniquePonds.set(pId, assign);
+          }
+        }
+
+        if (uniquePonds.size > 0) {
+          ponds = await Promise.all(
+            Array.from(uniquePonds.entries()).map(async ([pId, assign], idx): Promise<Pond> => {
+              if (assign.pond && typeof assign.pond === 'object') {
+                return {
+                  id: pId,
+                  farmId: assign.farmId || farmId,
+                  code: assign.pond.code || 'AO-01',
+                  name: assign.pond.name || assign.pondName || 'Ao nuôi được phân công',
+                  areaM2: Number(assign.pond.areaM2) || 3000,
+                  status: assign.pond.status || 'active',
+                  createdAt: assign.pond.createdAt || assign.createdAt || new Date().toISOString(),
+                  updatedAt: assign.pond.updatedAt || new Date().toISOString(),
+                };
+              }
+
               try {
                 const pRes = await apiClient.get<any>(Endpoints.ponds.detailInFarm(farmId, pId));
                 const pData = pRes.data?.data || pRes.data;
                 if (pData && pData.id) {
-                  pondMap.set(pId, pData as Pond);
-                  continue;
+                  return pData as Pond;
                 }
               } catch {
                 // Ignore
               }
-              pondMap.set(pId, {
+
+              return {
                 id: pId,
                 farmId: assign.farmId || farmId,
-                code: assign.pondCode || `AO-0${pondMap.size + 1}`,
-                name: assign.pondName || `Ao nuôi số ${pondMap.size + 1}`,
+                code: assign.pondCode || `AO-0${idx + 1}`,
+                name: assign.pondName || `Ao nuôi số ${idx + 1}`,
                 areaM2: Number(assign.areaM2) || 3000,
                 status: 'active',
                 createdAt: assign.createdAt || assign.assignedAt || new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
-              });
-            }
-          }
-        }
-        if (pondMap.size > 0) {
-          ponds = Array.from(pondMap.values());
+              };
+            })
+          );
         }
       }
 

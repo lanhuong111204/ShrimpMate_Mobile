@@ -1,5 +1,5 @@
 export type FeedingSource = 'schedule' | 'manual' | 'ai';
-export type FeedingStatus = 'running' | 'completed' | 'stopped' | 'failed';
+export type FeedingStatus = 'requested' | 'running' | 'completed' | 'stopped' | 'failed';
 export type SafetyDecision = 'allowed' | 'adjusted' | 'blocked';
 
 export interface FeedingSchedule {
@@ -27,24 +27,55 @@ export interface CreateFeedingScheduleRequest {
 export interface FeedingRecord {
   id: string;
   pondId: string;
-  deviceId: string;
+  deviceId?: string | null;
   scheduleId?: string | null;
   startedAt: string;
+  finishedAt?: string | null;
   requestedAmountKg: number;
-  actualAmountKg: number;
+  actualAmountKg: number | null;
   source: FeedingSource;
   status: FeedingStatus;
-  safetyDecision: SafetyDecision;
+  safetyDecision: SafetyDecision | null;
   safetyReason: string | null;
-  leftoverPercent?: number;
-  appetiteLevel?: number;
+  stoppedReason?: string | null;
+  useAiPrediction?: boolean;
+  leftoverPercent?: number | null;
+  appetiteLevel?: number | null;
 }
 
 export interface TriggerFeedingRequest {
-  deviceId: string;
-  scheduleId?: string;
+  deviceId?: string | null;
+  scheduleId?: string | null;
   requestedAmountKg: number;
   source: FeedingSource;
+  useAiPrediction?: boolean;
+  stoppedReason?: string | null;
+}
+
+export interface FeedingScheduleRecommendation {
+  hasActiveSeason: boolean;
+  message?: string;
+  pondId: string;
+  cropSeasonId?: string;
+  daysOfCulture: number;
+  estimatedAverageWeightG?: number;
+  estimatedBiomassKg: number;
+  feedLimits: {
+    dailyDemandRatePercent?: number;
+    dailyDemandKg: number;
+    maxDailyLimitKg: number;
+    minDailyLimitKg: number;
+    totalFedTodayKg: number;
+    remainingAllowanceTodayKg: number;
+  };
+  scheduleRecommendation: {
+    existingScheduleCount: number;
+    suggestedMealCount: number;
+    suggestedAmountPerMealKg: number;
+    minSafeMealKg: number;
+    maxSafeMealKg: number;
+    suggestedSpreadRate: number;
+  };
 }
 
 export interface UpdateFeedingProgressRequest {

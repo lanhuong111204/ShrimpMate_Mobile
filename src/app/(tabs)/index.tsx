@@ -28,7 +28,6 @@ export default function ScreenFeedingLog() {
     selectedPond,
     latestTelemetry,
     latestAiRecommendation,
-    latestFis,
     feedMeals,
     updateFeedMeal,
     evaluateSafetyBeforeFeed,
@@ -98,20 +97,23 @@ export default function ScreenFeedingLog() {
     totalTargetKg > 0 ? Math.round((totalDispensedKg / totalTargetKg) * 100) : 0;
 
   const handleAiAccept = async () => {
+    const res = await triggerQuickFeed(aiPredictedKg, 'ai', aiMeal?.id, 'Áp dụng khuyến nghị AI');
+    if (!res.success) {
+      const isBlocked = res.isSafetyBlocked || res.evaluation.decision === 'blocked';
+      Alert.alert(
+        isBlocked ? '⛔ Khóa An Toàn Sinh Học' : '❌ Không Thể Kích Hoạt Cữ Ăn',
+        res.errorMessage ||
+          res.evaluation.reasons.join('\n') ||
+          'Cấm xả cám do vi phạm ngưỡng an toàn nước.'
+      );
+      return;
+    }
     if (aiMeal) {
       updateFeedMeal(aiMeal.id, {
         targetKg: aiPredictedKg,
         isAiAccepted: true,
         notes: `Đã áp dụng khuyến nghị AI (${aiPredictedKg}kg): ${aiExplanation}`,
       });
-    }
-    const res = await triggerQuickFeed(aiPredictedKg, 'ai', aiMeal?.id, 'Áp dụng khuyến nghị AI');
-    if (!res.success) {
-      Alert.alert(
-        '⛔ Khóa An Toàn Sinh Học',
-        res.evaluation.reasons.join('\n') || 'Cấm xả cám do vi phạm ngưỡng an toàn nước.'
-      );
-      return;
     }
     Alert.alert(
       'Đã Áp Dụng Khuyến Nghị AI',
@@ -173,9 +175,11 @@ export default function ScreenFeedingLog() {
       const res = await triggerQuickFeed(parsedKg, 'manual', undefined, extraNote);
       setSafetyPreview(res.evaluation);
       if (!res.success || res.evaluation.decision === 'blocked') {
+        const isBlocked = res.isSafetyBlocked || res.evaluation.decision === 'blocked';
         Alert.alert(
-          '⛔ KHÓA AN TOÀN SINH HỌC (BLOCKED)',
-          res.evaluation.reasons.join('\n') ||
+          isBlocked ? '⛔ KHÓA AN TOÀN SINH HỌC (BLOCKED)' : '❌ KHÔNG THỂ GỬI LỆNH CHO ĂN',
+          res.errorMessage ||
+            res.evaluation.reasons.join('\n') ||
             'Chỉ số nước vượt ngưỡng nguy hiểm. Cấm xả cám!'
         );
         return;
@@ -214,7 +218,6 @@ export default function ScreenFeedingLog() {
     rawDoVal !== undefined && rawDoVal !== null && !isNaN(Number(rawDoVal))
       ? Number(rawDoVal)
       : undefined;
-  const fisLevel = latestFis?.hasData ? latestFis?.status?.appetiteLevel : undefined;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.surface }]}>
@@ -295,7 +298,7 @@ export default function ScreenFeedingLog() {
               <View style={[styles.badgePill, { backgroundColor: colors.secondaryContainer }]}>
                 <View style={[styles.dot, { backgroundColor: colors.secondary }]} />
                 <Text style={[styles.badgeText, { color: colors.onSecondaryContainer }]}>
-                  {fisLevel !== undefined ? `${feedMeals.length} Cữ • Mức ăn ${fisLevel}` : `${feedMeals.length} Cữ ăn`}
+                  {`${feedMeals.length} Cữ ăn`}
                 </Text>
               </View>
             </View>

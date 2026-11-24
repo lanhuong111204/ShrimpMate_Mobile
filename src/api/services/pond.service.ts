@@ -4,14 +4,19 @@ import { AppConfig } from '@/constants/config';
 import { Storage } from '@/utils/storage';
 import { Pond, PondDevice, PondTelemetryLog, StatusLevel } from '@/types/pond';
 import { TelemetryHistoryQuery, TelemetryReading } from '@/types/telemetry';
-import { AppetiteLevel, CameraAnalyzePayload, LatestFisResponse } from '@/types/camera';
 import {
   AiRecommendation,
+  FeatureContribution,
   PredictFeedOverrideDto,
   PredictFeedResponse,
   PredictedTrendsResponse,
 } from '@/types/ai';
-import { FeedingRecord, FeedingSchedule, TriggerFeedingRequest } from '@/types/feeding';
+import {
+  FeedingRecord,
+  FeedingSchedule,
+  FeedingScheduleRecommendation,
+  TriggerFeedingRequest,
+} from '@/types/feeding';
 import { EvaluateSafetyRequest, EvaluateSafetyResponse } from '@/types/safety-rule';
 import { Device, EmergencyStopResponse } from '@/types/device';
 import { CropSeason, CropSeasonStatistics } from '@/types/crop-season';
@@ -27,32 +32,16 @@ export interface WaterStatusColorSet {
   label: string;
 }
 
-const APPETITE_DESCRIPTIONS: Record<AppetiteLevel, string> = {
-  0: 'Không ăn (Dư cám nhiều)',
-  1: 'Ăn yếu (Sót cám nhá)',
-  2: 'Bình thường (Tiêu thụ ổn)',
-  3: 'Ăn mạnh (Sạch nhá)',
-};
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const DEFAULT_LEFTOVER_BY_APPETITE: Record<AppetiteLevel, number> = {
-  0: 45,
-  1: 25,
-  2: 10,
-  3: 3,
-};
+function isValidUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID_REGEX.test(value.trim());
+}
 
 function toNullableNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function clampAppetiteLevel(value: number): AppetiteLevel {
-  const rounded = Math.round(value);
-  if (rounded <= 0) return 0;
-  if (rounded === 1) return 1;
-  if (rounded === 2) return 2;
-  return 3;
 }
 
 function normalizeAiRecommendation(raw: any): AiRecommendation | null {
@@ -67,6 +56,15 @@ function normalizeAiRecommendation(raw: any): AiRecommendation | null {
   ) {
     return null;
   }
+  const snapshot =
+    item.inputSnapshot && typeof item.inputSnapshot === 'object' ? item.inputSnapshot : undefined;
+  const rawBaseValue = item.baseValueKg ?? snapshot?.baseValueKg;
+  const rawContributions: FeatureContribution[] | undefined = Array.isArray(item.featureContributions)
+    ? item.featureContributions
+    : Array.isArray(snapshot?.featureContributions)
+    ? snapshot.featureContributions
+    : undefined;
+
   return {
     ...item,
     predictedFeedAmountKg: Number(item.predictedFeedAmountKg),
@@ -74,28 +72,15 @@ function normalizeAiRecommendation(raw: any): AiRecommendation | null {
       item.safeAllowedAmountKg !== undefined && item.safeAllowedAmountKg !== null
         ? Number(item.safeAllowedAmountKg)
         : undefined,
-    spreadRateKgPerMinute:
-      item.spreadRateKgPerMinute !== undefined && item.spreadRateKgPerMinute !== null
-        ? Number(item.spreadRateKgPerMinute)
-        : undefined,
-    appetiteLevel:
-      item.appetiteLevel !== undefined && item.appetiteLevel !== null
-        ? Number(item.appetiteLevel)
-        : undefined,
-    biomassKg:
-      item.biomassKg !== undefined && item.biomassKg !== null ? Number(item.biomassKg) : undefined,
-    feedRatePercent:
-      item.feedRatePercent !== undefined && item.feedRatePercent !== null
-        ? Number(item.feedRatePercent)
-        : undefined,
-    anomalyScore:
-      item.anomalyScore !== undefined && item.anomalyScore !== null
-        ? Number(item.anomalyScore)
-        : undefined,
-    confidence:
-      item.confidence !== undefined && item.confidence !== null
-        ? Number(item.confidence)
-        : undefined,
+    baseValueKg: toNullableNumber(rawBaseValue),
+    spreadRateKgPerMinute: toNullableNumber(item.spreadRateKgPerMinute),
+    appetiteLevel: toNullableNumber(item.appetiteLevel),
+    biomassKg: toNullableNumber(item.biomassKg),
+    feedRatePercent: toNullableNumber(item.feedRatePercent),
+    anomalyScore: toNullableNumber(item.anomalyScore),
+    confidence: toNullableNumber(item.confidence),
+    featureContributions: rawContributions,
+    inputSnapshot: snapshot,
   };
 }
 
@@ -103,7 +88,10 @@ function normalizeFeedingRecords(items: any[]): FeedingRecord[] {
   return items.map((rec) => ({
     ...rec,
     requestedAmountKg: Number(rec.requestedAmountKg) || 0,
-    actualAmountKg: Number(rec.actualAmountKg) || 0,
+    actualAmountKg:
+      rec.actualAmountKg !== undefined && rec.actualAmountKg !== null
+        ? Number(rec.actualAmountKg) || 0
+        : 0,
     leftoverPercent:
       rec.leftoverPercent !== undefined && rec.leftoverPercent !== null
         ? Number(rec.leftoverPercent)
@@ -113,179 +101,6 @@ function normalizeFeedingRecords(items: any[]): FeedingRecord[] {
         ? Number(rec.appetiteLevel)
         : undefined,
   }));
-}
-
-function normalizeFisPayload(raw: any): LatestFisResponse | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const data = raw.data && typeof raw.data === 'object' && 'hasData' in raw.data ? raw.data : raw;
-  if (typeof data.hasData !== 'boolean') return null;
-  if (data.status) {
-    data.status = {
-      ...data.status,
-      fisScore: Number(data.status.fisScore) || 0,
-      appetiteLevel: clampAppetiteLevel(Number(data.status.appetiteLevel) || 0),
-      remainingFeedPercent: Number(data.status.remainingFeedPercent) || 0,
-      shrimpDensity: Number(data.status.shrimpDensity) || 0,
-      consumptionVelocity: Number(data.status.consumptionVelocity) || 0,
-      ageSeconds: Number(data.status.ageSeconds) || 0,
-    };
-    if (data.status.ageSeconds > 120) {
-      data.status.isStale = true;
-    }
-  }
-  return data as LatestFisResponse;
-}
-
-function buildSynthesizedFis(
-  pondId: string,
-  aiRec: AiRecommendation | null,
-  records: FeedingRecord[],
-  markFresh = false
-): LatestFisResponse {
-  const sortedRecords = [...records].sort((a, b) => {
-    const tA = new Date(a.startedAt || 0).getTime() || 0;
-    const tB = new Date(b.startedAt || 0).getTime() || 0;
-    return tB - tA;
-  });
-
-  const latestRecord =
-    sortedRecords.find(
-      (r) =>
-        (r.appetiteLevel !== undefined && r.appetiteLevel !== null) ||
-        (r.leftoverPercent !== undefined && r.leftoverPercent !== null)
-    ) ||
-    sortedRecords[0] ||
-    null;
-
-  if (!aiRec && !latestRecord) {
-    return { hasData: false, pondId };
-  }
-
-  let appetiteLevel: AppetiteLevel = 2;
-  if (
-    latestRecord?.appetiteLevel !== undefined &&
-    latestRecord.appetiteLevel !== null &&
-    !isNaN(Number(latestRecord.appetiteLevel))
-  ) {
-    appetiteLevel = clampAppetiteLevel(Number(latestRecord.appetiteLevel));
-  } else if (
-    aiRec?.appetiteLevel !== undefined &&
-    aiRec.appetiteLevel !== null &&
-    !isNaN(Number(aiRec.appetiteLevel))
-  ) {
-    appetiteLevel = clampAppetiteLevel(Number(aiRec.appetiteLevel));
-  } else if (
-    latestRecord?.leftoverPercent !== undefined &&
-    latestRecord.leftoverPercent !== null &&
-    !isNaN(Number(latestRecord.leftoverPercent))
-  ) {
-    const leftover = Number(latestRecord.leftoverPercent);
-    appetiteLevel = leftover <= 5 ? 3 : leftover <= 15 ? 2 : leftover <= 35 ? 1 : 0;
-  }
-
-  const remainingFeedPercent =
-    latestRecord?.leftoverPercent !== undefined &&
-    latestRecord.leftoverPercent !== null &&
-    !isNaN(Number(latestRecord.leftoverPercent))
-      ? Math.max(0, Math.min(100, Math.round(Number(latestRecord.leftoverPercent))))
-      : DEFAULT_LEFTOVER_BY_APPETITE[appetiteLevel];
-
-  const fisScore = Math.max(
-    0,
-    Math.min(
-      1,
-      Number((((100 - remainingFeedPercent) / 100) * 0.4 + (appetiteLevel / 3) * 0.6).toFixed(2))
-    )
-  );
-
-  const rawTimestamp = markFresh
-    ? new Date().toISOString()
-    : latestRecord?.startedAt || aiRec?.createdAt || new Date().toISOString();
-  const parsedTime = new Date(rawTimestamp).getTime();
-  const ageSeconds = markFresh
-    ? 1
-    : Number.isFinite(parsedTime)
-    ? Math.max(0, Math.floor((Date.now() - parsedTime) / 1000))
-    : 0;
-
-  return {
-    hasData: true,
-    pondId,
-    status: {
-      fisScore,
-      appetiteLevel,
-      appetiteLevelDescription: APPETITE_DESCRIPTIONS[appetiteLevel],
-      remainingFeedPercent,
-      shrimpDensity: Number((aiRec as any)?.shrimpDensity ?? (latestRecord as any)?.shrimpDensity ?? 0) || 0,
-      consumptionVelocity:
-        Number(aiRec?.spreadRateKgPerMinute ?? (latestRecord as any)?.consumptionVelocity ?? 0) || 0,
-      timestamp: rawTimestamp,
-      ageSeconds,
-      isStale: ageSeconds > 120,
-    },
-  };
-}
-
-async function synthesizeFisFromPondData(
-  pondId: string,
-  markFresh: boolean
-): Promise<LatestFisResponse> {
-  const [aiResult, recordsResult] = await Promise.allSettled([
-    apiClient.get<any>(Endpoints.ai.recommendationsLatest(pondId)),
-    apiClient.get<any>(Endpoints.feedings.records(pondId)),
-  ]);
-
-  const aiRec =
-    aiResult.status === 'fulfilled'
-      ? normalizeAiRecommendation(aiResult.value.data)
-      : normalizeAiRecommendation(
-          await Storage.getJSON<any>(`${AppConfig.storageKeys.cachedAiRec}_${pondId}`)
-        );
-
-  let records: FeedingRecord[] = [];
-  if (recordsResult.status === 'fulfilled') {
-    const raw = recordsResult.value.data;
-    const list: any[] = Array.isArray(raw)
-      ? raw
-      : raw && Array.isArray(raw.data)
-      ? raw.data
-      : [];
-    records = normalizeFeedingRecords(list);
-  } else {
-    const cachedRecs = await Storage.getJSON<any[]>(
-      `${AppConfig.storageKeys.cachedRecords}_${pondId}`
-    );
-    records = Array.isArray(cachedRecs) ? normalizeFeedingRecords(cachedRecs) : [];
-  }
-
-  if (
-    !markFresh &&
-    aiResult.status === 'rejected' &&
-    recordsResult.status === 'rejected' &&
-    !aiRec &&
-    records.length === 0
-  ) {
-    const cachedFis = await Storage.getJSON<any>(`${AppConfig.storageKeys.cachedFis}_${pondId}`);
-    const normalized = normalizeFisPayload(cachedFis);
-    if (normalized) {
-      if (normalized.status?.timestamp) {
-        const ageSec = Math.max(
-          0,
-          Math.floor((Date.now() - new Date(normalized.status.timestamp).getTime()) / 1000)
-        );
-        normalized.status.ageSeconds = ageSec;
-        normalized.status.isStale = ageSec > 120;
-      }
-      return normalized;
-    }
-    return { hasData: false, pondId };
-  }
-
-  const synthesized = buildSynthesizedFis(pondId, aiRec, records, markFresh);
-  if (synthesized.hasData) {
-    await Storage.setJSON(`${AppConfig.storageKeys.cachedFis}_${pondId}`, synthesized);
-  }
-  return synthesized;
 }
 
 /**
@@ -442,22 +257,6 @@ export const pondService = {
   },
 
   /**
-   * Tổng hợp chỉ số cường độ bắt mồi FIS từ /ponds/:pondId/ai/recommendations/latest
-   * và /ponds/:pondId/feeding-records (không gọi /camera/* gây 404).
-   */
-  async getLatestFis(pondId: string): Promise<LatestFisResponse> {
-    return synthesizeFisFromPondData(pondId, false);
-  },
-
-  /**
-   * Làm mới đánh giá nhá ăn / FIS tổng hợp từ /ponds/:pondId/ai/recommendations/latest
-   * và /ponds/:pondId/feeding-records (không gọi /camera/analyze gây 404).
-   */
-  async analyzeCameraFrame(payload: CameraAnalyzePayload): Promise<LatestFisResponse> {
-    return synthesizeFisFromPondData(payload.pondId, true);
-  },
-
-  /**
    * 12.1. Lấy khuyến nghị AI mới nhất cho ao nuôi
    * Endpoint: GET /ponds/:pondId/ai/recommendations/latest (trả về { recommendation })
    */
@@ -498,13 +297,25 @@ export const pondService = {
     return {
       recommendationId: String(item?.recommendationId ?? item?.id ?? ''),
       pondId: String(item?.pondId ?? pondId),
+      modelName: item?.modelName ? String(item.modelName) : undefined,
+      modelVersion: item?.modelVersion ? String(item.modelVersion) : undefined,
       predictedFeedAmountKg: Number(item?.predictedFeedAmountKg) || 0,
       safeAllowedAmountKg: Number(item?.safeAllowedAmountKg ?? item?.predictedFeedAmountKg) || 0,
+      baseValueKg: toNullableNumber(item?.baseValueKg),
       biomassKg: Number(item?.biomassKg) || 0,
       feedRatePercent: Number(item?.feedRatePercent) || 0,
       safetyDecision: item?.safetyDecision ?? 'allowed',
       safetyReasons: Array.isArray(item?.safetyReasons) ? item.safetyReasons : [],
       explanation: String(item?.explanation ?? ''),
+      featureContributions: Array.isArray(item?.featureContributions)
+        ? item.featureContributions
+        : undefined,
+      inputSnapshot:
+        item?.inputSnapshot && typeof item.inputSnapshot === 'object'
+          ? item.inputSnapshot
+          : item?.featureBreakdown && typeof item.featureBreakdown === 'object'
+          ? item.featureBreakdown
+          : undefined,
       createdAt: String(item?.createdAt ?? new Date().toISOString()),
     };
   },
@@ -537,7 +348,10 @@ export const pondService = {
         adaptiveAction: String(item.adaptiveAction ?? ''),
         decision: item.decision ?? 'allowed',
         reasons: Array.isArray(item.reasons) ? item.reasons : [],
-        recommendation: normalizeAiRecommendation(item.recommendation),
+        recommendation:
+          typeof item.recommendation === 'string'
+            ? item.recommendation
+            : normalizeAiRecommendation(item.recommendation),
       };
     };
 
@@ -614,6 +428,20 @@ export const pondService = {
   },
 
   /**
+   * 9.1b. Lấy ngưỡng thức ăn giới hạn & gợi ý lập lịch cho ăn (GET /ponds/:pondId/feeding-schedules/recommendation)
+   */
+  async getFeedingScheduleRecommendation(
+    pondId: string
+  ): Promise<FeedingScheduleRecommendation | null> {
+    try {
+      const res = await apiClient.get<any>(Endpoints.feedings.scheduleRecommendation(pondId));
+      return (res.data?.data ?? res.data) || null;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
    * 9.4. Lịch sử nhật ký các lần cho ăn (GET /ponds/:pondId/feeding-records)
    */
   async getFeedingRecords(pondId: string): Promise<FeedingRecord[]> {
@@ -648,10 +476,15 @@ export const pondService = {
     payload: EvaluateSafetyRequest,
     fallbackTelemetry?: TelemetryReading | null
   ): Promise<EvaluateSafetyResponse> {
+    const body: EvaluateSafetyRequest = {
+      requestedAmountKg: payload.requestedAmountKg,
+      ...(isValidUuid(payload.deviceId) ? { deviceId: payload.deviceId.trim() } : {}),
+    };
+
     try {
       const response = await apiClient.post<EvaluateSafetyResponse>(
         Endpoints.safetyRules.evaluate(pondId),
-        payload
+        body
       );
       if (response.data && response.data.decision) {
         return response.data;
@@ -753,9 +586,17 @@ export const pondService = {
     pondId: string,
     payload: TriggerFeedingRequest
   ): Promise<FeedingRecord> {
+    const body: TriggerFeedingRequest = {
+      requestedAmountKg: payload.requestedAmountKg,
+      source: payload.source,
+      ...(isValidUuid(payload.deviceId) ? { deviceId: payload.deviceId.trim() } : {}),
+      ...(isValidUuid(payload.scheduleId) ? { scheduleId: payload.scheduleId.trim() } : {}),
+      ...(payload.useAiPrediction !== undefined ? { useAiPrediction: payload.useAiPrediction } : {}),
+      ...(payload.stoppedReason !== undefined ? { stoppedReason: payload.stoppedReason } : {}),
+    };
     const response = await apiClient.post<FeedingRecord>(
       Endpoints.feedings.triggerRecord(pondId),
-      payload
+      body
     );
     return response.data;
   },

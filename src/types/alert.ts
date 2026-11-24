@@ -31,4 +31,5 @@ export interface AlertItem {
   acknowledgedAt?: string | null;
   resolvedAt?: string | null;
   suggestedAction?: string;
+  isBuffered?: boolean;
 }

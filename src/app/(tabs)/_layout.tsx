@@ -62,7 +62,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="quan-ly-ao"
         options={{
-          title: 'Giám Sát',
+          title: 'Giám Sát Nước',
           tabBarIcon: ({ color, focused }) => (
             <MaterialIcons
               name="waves"

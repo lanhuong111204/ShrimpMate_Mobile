@@ -1,4 +1,4 @@
-export type DeviceType = 'feeder' | 'sensor_node' | 'camera' | 'edge_gateway';
+export type DeviceType = 'feeder' | 'sensor_node' | 'edge_gateway';
 export type DeviceStatus = 'online' | 'offline' | 'error' | 'maintenance';
 export type DeviceMode = 'automatic' | 'manual' | 'emergency_stop';
 
