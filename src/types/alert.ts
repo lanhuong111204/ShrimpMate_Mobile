@@ -32,4 +32,16 @@ export interface AlertItem {
   resolvedAt?: string | null;
   suggestedAction?: string;
   isBuffered?: boolean;
+  aiRecommendation?: {
+    id?: string;
+    explanation?: string;
+    predictedFeedAmountKg?: number;
+  } | null;
+  metadata?: {
+    actionRecommendation?: string;
+    latestValue?: number | string;
+    unit?: string;
+    repeatCount?: number;
+    [key: string]: any;
+  } | null;
 }

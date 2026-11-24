@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -16,7 +16,9 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '@/hooks/use-theme';
 import { AppHeader } from '@/components/common/app-header';
 import { NoAssignedPondState } from '@/components/common/no-assigned-pond';
+import { SafetyBlockedModal } from '@/components/common/safety-blocked-modal';
 import { useFarm } from '@/context/farm-context';
+import { FeatureContribution } from '@/types/ai';
 import { EvaluateSafetyResponse } from '@/types/safety-rule';
 
 export default function ScreenFeedingLog() {
@@ -28,6 +30,8 @@ export default function ScreenFeedingLog() {
     selectedPond,
     latestTelemetry,
     latestAiRecommendation,
+    predictedTrends,
+    requestAiFeedPrediction,
     feedMeals,
     updateFeedMeal,
     evaluateSafetyBeforeFeed,
@@ -44,6 +48,22 @@ export default function ScreenFeedingLog() {
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [isSubmittingExtra, setIsSubmittingExtra] = useState(false);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+  const [isPredictingAi, setIsPredictingAi] = useState(false);
+  const [blockedModalInfo, setBlockedModalInfo] = useState<{
+    visible: boolean;
+    reasons: string[];
+    telemetrySnapshot?: EvaluateSafetyResponse['telemetrySnapshot'] | null;
+  }>({ visible: false, reasons: [], telemetrySnapshot: null });
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const handlePullRefresh = async (refreshAction: () => Promise<void>) => {
     setIsManualRefreshing(true);
@@ -81,12 +101,39 @@ export default function ScreenFeedingLog() {
   // Tìm cữ gợi ý AI hoặc cữ chiều
   const aiMeal = feedMeals.find((m) => m.status === 'ai_suggested' || m.id === 'meal-3') || feedMeals[0];
   const aiPredictedKg =
-    Number(latestAiRecommendation?.predictedFeedAmountKg ?? aiMeal?.aiSuggestedKg ?? 0) || 0;
+    Number(
+      latestAiRecommendation?.safeAllowedAmountKg ??
+        latestAiRecommendation?.predictedFeedAmountKg ??
+        aiMeal?.aiSuggestedKg ??
+        0
+    ) || 0;
+  const aiBaseValueKg =
+    latestAiRecommendation?.baseValueKg ?? latestAiRecommendation?.inputSnapshot?.baseValueKg;
+  const aiContributions: FeatureContribution[] = Array.isArray(
+    latestAiRecommendation?.featureContributions
+  )
+    ? latestAiRecommendation.featureContributions
+    : Array.isArray(latestAiRecommendation?.inputSnapshot?.featureContributions)
+    ? latestAiRecommendation.inputSnapshot.featureContributions
+    : [];
+  const trendsRecommendationText =
+    typeof predictedTrends?.recommendation === 'string'
+      ? predictedTrends.recommendation
+      : predictedTrends?.recommendation?.explanation ||
+        predictedTrends?.reasons?.[0] ||
+        '';
+  const aiSafetyDecision = latestAiRecommendation?.safetyDecision || 'allowed';
+  const aiSafetyReason =
+    latestAiRecommendation?.safetyReason ||
+    (Array.isArray(latestAiRecommendation?.safetyReasons)
+      ? latestAiRecommendation.safetyReasons.join('; ')
+      : '');
   const aiBiomassKg =
     latestAiRecommendation?.biomassKg !== undefined && latestAiRecommendation?.biomassKg !== null
       ? Number(latestAiRecommendation.biomassKg)
       : undefined;
-  const aiModelName = latestAiRecommendation?.modelName || 'ShrimpMate-AI';
+  const aiModelName = latestAiRecommendation?.modelName || 'XGBoost-Regressor';
+  const aiModelVersion = latestAiRecommendation?.modelVersion || 'v2.0.0';
   const aiExplanation = latestAiRecommendation?.explanation || '';
 
   // Summary computations
@@ -96,16 +143,40 @@ export default function ScreenFeedingLog() {
   const overallPercent =
     totalTargetKg > 0 ? Math.round((totalDispensedKg / totalTargetKg) * 100) : 0;
 
+  const handlePredictAi = async () => {
+    if (isPredictingAi) return;
+    setIsPredictingAi(true);
+    try {
+      const res = await requestAiFeedPrediction();
+      if (!res) {
+        Alert.alert('Không thể dự báo AI', 'Chưa thể kết nối máy chủ dự báo AI. Vui lòng thử lại sau.');
+      }
+    } finally {
+      setIsPredictingAi(false);
+    }
+  };
+
   const handleAiAccept = async () => {
     const res = await triggerQuickFeed(aiPredictedKg, 'ai', aiMeal?.id, 'Áp dụng khuyến nghị AI');
     if (!res.success) {
       const isBlocked = res.isSafetyBlocked || res.evaluation.decision === 'blocked';
-      Alert.alert(
-        isBlocked ? '⛔ Khóa An Toàn Sinh Học' : '❌ Không Thể Kích Hoạt Cữ Ăn',
-        res.errorMessage ||
-          res.evaluation.reasons.join('\n') ||
-          'Cấm xả cám do vi phạm ngưỡng an toàn nước.'
-      );
+      if (isBlocked) {
+        setBlockedModalInfo({
+          visible: true,
+          reasons:
+            res.evaluation.reasons?.length > 0
+              ? res.evaluation.reasons
+              : res.errorMessage
+              ? [res.errorMessage]
+              : ['Cấm xả cám do vi phạm ngưỡng an toàn nước.'],
+          telemetrySnapshot: res.evaluation.telemetrySnapshot || null,
+        });
+      } else {
+        Alert.alert(
+          '❌ Không Thể Kích Hoạt Cữ Ăn',
+          res.errorMessage || 'Không thể gửi lệnh cho ăn tới máy chủ.'
+        );
+      }
       return;
     }
     if (aiMeal) {
@@ -148,19 +219,61 @@ export default function ScreenFeedingLog() {
     }
   };
 
-  const handleChangeExtraKg = async (val: string) => {
+  const handleChangeExtraKg = (val: string) => {
     setExtraKg(val);
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
     const parsed = parseFloat(val);
     if (!isNaN(parsed) && parsed > 0) {
-      setIsEvaluating(true);
-      try {
-        const ev = await evaluateSafetyBeforeFeed(parsed);
-        setSafetyPreview(ev);
-      } catch {
-        setSafetyPreview(null);
-      } finally {
-        setIsEvaluating(false);
+      debounceTimerRef.current = setTimeout(async () => {
+        setIsEvaluating(true);
+        try {
+          const ev = await evaluateSafetyBeforeFeed(parsed);
+          setSafetyPreview(ev);
+        } catch {
+          setSafetyPreview(null);
+        } finally {
+          setIsEvaluating(false);
+        }
+      }, 300);
+    }
+  };
+
+  const handleSuggestAiForQuickFeed = async () => {
+    if (isPredictingAi) return;
+    setIsPredictingAi(true);
+    try {
+      const res = await requestAiFeedPrediction();
+      if (!res) {
+        Alert.alert('Không thể lấy gợi ý AI', 'Chưa thể kết nối máy chủ dự báo AI. Vui lòng thử lại sau.');
+        return;
       }
+      const suggested = Number(res.safeAllowedAmountKg ?? res.predictedFeedAmountKg ?? 0);
+      if (suggested > 0) {
+        const nextVal = suggested.toFixed(1);
+        setExtraKg(nextVal);
+        setIsEvaluating(true);
+        try {
+          const ev = await evaluateSafetyBeforeFeed(Number(nextVal));
+          setSafetyPreview(ev);
+        } finally {
+          setIsEvaluating(false);
+        }
+      } else if (res.safetyDecision === 'blocked') {
+        setShowExtraModal(false);
+        setBlockedModalInfo({
+          visible: true,
+          reasons:
+            res.safetyReasons?.length > 0
+              ? res.safetyReasons
+              : ['AI / Safety Rule Engine đang khóa cho ăn do môi trường nước chưa đạt chuẩn.'],
+          telemetrySnapshot: null,
+        });
+      }
+    } finally {
+      setIsPredictingAi(false);
     }
   };
 
@@ -176,12 +289,24 @@ export default function ScreenFeedingLog() {
       setSafetyPreview(res.evaluation);
       if (!res.success || res.evaluation.decision === 'blocked') {
         const isBlocked = res.isSafetyBlocked || res.evaluation.decision === 'blocked';
-        Alert.alert(
-          isBlocked ? '⛔ KHÓA AN TOÀN SINH HỌC (BLOCKED)' : '❌ KHÔNG THỂ GỬI LỆNH CHO ĂN',
-          res.errorMessage ||
-            res.evaluation.reasons.join('\n') ||
-            'Chỉ số nước vượt ngưỡng nguy hiểm. Cấm xả cám!'
-        );
+        if (isBlocked) {
+          setShowExtraModal(false);
+          setBlockedModalInfo({
+            visible: true,
+            reasons:
+              res.evaluation.reasons?.length > 0
+                ? res.evaluation.reasons
+                : res.errorMessage
+                ? [res.errorMessage]
+                : ['Chỉ số nước vượt ngưỡng nguy hiểm. Cấm xả cám!'],
+            telemetrySnapshot: res.evaluation.telemetrySnapshot || null,
+          });
+        } else {
+          Alert.alert(
+            '❌ KHÔNG THỂ GỬI LỆNH CHO ĂN',
+            res.errorMessage || 'Không thể gửi lệnh cho ăn tới máy chủ.'
+          );
+        }
         return;
       }
       setShowExtraModal(false);
@@ -357,76 +482,229 @@ export default function ScreenFeedingLog() {
             </View>
           </View>
 
-          {/* AI Recommendation Summary Card (UC014 - GET /ponds/:pondId/ai/recommendations/latest) */}
+          {/* Banner Dự báo Xu hướng DO 1-2h tới */}
+          {predictedTrends && (
+            <View
+              style={[
+                styles.trendsBanner,
+                {
+                  backgroundColor:
+                    predictedTrends.riskLevel === 'CRITICAL'
+                      ? '#FEF2F2'
+                      : predictedTrends.riskLevel === 'WARNING'
+                      ? '#FFFBEB'
+                      : '#F0FDF4',
+                  borderColor:
+                    predictedTrends.riskLevel === 'CRITICAL'
+                      ? '#FECACA'
+                      : predictedTrends.riskLevel === 'WARNING'
+                      ? '#FDE68A'
+                      : '#86EFAC',
+                },
+              ]}>
+              <View style={styles.trendsHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                  <MaterialIcons
+                    name={
+                      predictedTrends.riskLevel === 'CRITICAL' ||
+                      predictedTrends.riskLevel === 'WARNING'
+                        ? 'warning-amber'
+                        : 'insights'
+                    }
+                    size={18}
+                    color={
+                      predictedTrends.riskLevel === 'CRITICAL'
+                        ? '#BA1A1A'
+                        : predictedTrends.riskLevel === 'WARNING'
+                        ? '#B45309'
+                        : '#006E2D'
+                    }
+                  />
+                  <Text style={styles.trendsTitle}>DỰ BÁO DO 1–2 GIỜ TỚI</Text>
+                </View>
+                <View style={styles.trendsBadge}>
+                  <Text style={styles.trendsBadgeText}>
+                    {predictedTrends.riskLevel || 'NORMAL'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.trendsMetricsRow}>
+                <Text style={styles.trendsMetric}>
+                  Hiện tại: <Text style={{ fontWeight: '900' }}>{predictedTrends.currentDo ?? '--'} mg/L</Text>
+                </Text>
+                <Text style={styles.trendsMetric}>
+                  +1h: <Text style={{ fontWeight: '900' }}>{predictedTrends.predictedDo1h ?? '--'}</Text>
+                </Text>
+                <Text style={styles.trendsMetric}>
+                  +2h: <Text style={{ fontWeight: '900' }}>{predictedTrends.predictedDo2h ?? '--'}</Text>
+                </Text>
+              </View>
+              {!!trendsRecommendationText && (
+                <Text style={styles.trendsDesc}>{trendsRecommendationText}</Text>
+              )}
+            </View>
+          )}
+
+          {/* AI Recommendation Summary Card (UC014 + TreeSHAP XAI) */}
           {latestAiRecommendation ? (
             <View
               style={[
                 styles.aiCard,
                 {
                   backgroundColor:
-                    aiMeal?.isAiAccepted === true
+                    aiSafetyDecision === 'blocked'
+                      ? '#FEF2F2'
+                      : aiMeal?.isAiAccepted === true
                       ? '#E8F5E9'
                       : aiMeal?.isAiAccepted === false
                       ? '#FFF3E0'
                       : '#FFF8F5',
-                  borderColor: aiMeal?.isAiAccepted === true ? '#7CF994' : '#F97316',
+                  borderColor:
+                    aiSafetyDecision === 'blocked'
+                      ? '#EF4444'
+                      : aiMeal?.isAiAccepted === true
+                      ? '#7CF994'
+                      : '#F97316',
                 },
               ]}>
               <View style={styles.aiHeader}>
                 <View style={styles.aiBadgeGroup}>
                   <MaterialIcons name="auto-awesome" size={20} color="#F97316" />
-                  <Text style={styles.aiBadgeTitle}>
-                    KHUYẾN NGHỊ AI ({aiModelName.toUpperCase()})
-                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.aiBadgeTitle}>
+                      KHUYẾN NGHỊ AI ({aiModelName.toUpperCase()})
+                    </Text>
+                    <Text style={styles.aiModelSub}>
+                      {aiModelVersion} • TreeSHAP XAI
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.aiStatusBadge}>
-                  <Text style={styles.aiStatusText}>
-                    {aiMeal?.isAiAccepted === true
+                <View
+                  style={[
+                    styles.aiStatusBadge,
+                    aiSafetyDecision === 'blocked' && { backgroundColor: '#FFDAD6' },
+                    aiSafetyDecision === 'adjusted' && { backgroundColor: '#FEF3C7' },
+                    aiSafetyDecision === 'allowed' && { backgroundColor: '#E8F5E9' },
+                  ]}>
+                  <Text
+                    style={[
+                      styles.aiStatusText,
+                      aiSafetyDecision === 'blocked' && { color: '#BA1A1A' },
+                      aiSafetyDecision === 'adjusted' && { color: '#92400E' },
+                      aiSafetyDecision === 'allowed' && { color: '#006E2D' },
+                    ]}>
+                    {aiSafetyDecision === 'blocked'
+                      ? 'ĐÃ KHÓA AN TOÀN'
+                      : aiSafetyDecision === 'adjusted'
+                      ? 'ĐÃ ĐIỀU CHỈNH'
+                      : aiMeal?.isAiAccepted === true
                       ? '✓ ĐÃ ÁP DỤNG'
-                      : aiMeal?.isAiAccepted === false
-                      ? 'GIỮ ĐỊNH MỨC'
-                      : `TIN CẬY ${Math.round((latestAiRecommendation?.confidence ?? 0.94) * 100)}%`}
+                      : 'TỐI ƯU'}
                   </Text>
                 </View>
               </View>
 
-              <Text style={styles.aiBodyText}>
-                Khuyến nghị cữ hiện tại:{' '}
-                <Text style={{ fontWeight: '900', color: '#006E2D' }}>
-                  {aiPredictedKg.toFixed(1)} kg
-                </Text>{' '}
-                • Tốc độ rải:{' '}
-                <Text style={{ fontWeight: '900', color: '#9D4300' }}>
-                  {latestAiRecommendation?.spreadRateKgPerMinute ?? 1.5} kg/phút
-                </Text>
-              </Text>
-              <Text style={styles.aiReasonText}>💡 {aiExplanation}</Text>
+              <View style={styles.aiAmountRow}>
+                <Text style={styles.aiBigKg}>{aiPredictedKg.toFixed(2)}</Text>
+                <Text style={styles.aiBigUnit}>kg / cữ</Text>
+                {aiBaseValueKg !== undefined && aiBaseValueKg !== null && (
+                  <Text style={styles.aiBaseNote}>
+                    (Mốc cơ sở: {Number(aiBaseValueKg).toFixed(2)} kg)
+                  </Text>
+                )}
+              </View>
+
+              {!!aiExplanation && <Text style={styles.aiReasonText}>💡 {aiExplanation}</Text>}
+
+              {aiSafetyDecision !== 'allowed' && !!aiSafetyReason && (
+                <View style={styles.aiSafetyNote}>
+                  <MaterialIcons name="shield" size={14} color="#BA1A1A" />
+                  <Text style={styles.aiSafetyNoteText}>{aiSafetyReason}</Text>
+                </View>
+              )}
+
+              {/* TreeSHAP Feature Contributions Pills */}
+              {aiContributions.length > 0 && (
+                <View style={styles.shapSection}>
+                  <Text style={styles.shapHeading}>YẾU TỐ CHI PHỐI KHẨU PHẦN (TREESHAP):</Text>
+                  <View style={styles.shapWrap}>
+                    {aiContributions.map((item, idx) => {
+                      const delta = Number(item.deltaKg || 0);
+                      const isInc = item.impact === 'INCREASE';
+                      const isDec = item.impact === 'DECREASE';
+                      return (
+                        <View
+                          key={`${item.feature || item.name}-${idx}`}
+                          style={[
+                            styles.shapPill,
+                            isInc
+                              ? styles.shapPillInc
+                              : isDec
+                              ? styles.shapPillDec
+                              : styles.shapPillNeu,
+                          ]}>
+                          <MaterialIcons
+                            name={isInc ? 'trending-up' : isDec ? 'trending-down' : 'remove'}
+                            size={12}
+                            color={isInc ? '#006E2D' : isDec ? '#BA1A1A' : '#475569'}
+                          />
+                          <Text
+                            style={[
+                              styles.shapPillText,
+                              { color: isInc ? '#006E2D' : isDec ? '#BA1A1A' : '#475569' },
+                            ]}>
+                            {item.name}: {delta > 0 ? `+${delta.toFixed(2)}` : delta.toFixed(2)} kg
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+
+              <View style={styles.aiActionsRow}>
+                <Pressable
+                  onPress={handleAiAccept}
+                  disabled={aiSafetyDecision === 'blocked'}
+                  style={({ pressed }) => [
+                    styles.btnAiAccept,
+                    aiSafetyDecision === 'blocked' && { backgroundColor: '#9CA3AF' },
+                    { opacity: pressed ? 0.9 : 1 },
+                  ]}>
+                  <MaterialIcons name="check" size={18} color="#FFFFFF" />
+                  <Text style={styles.btnAiAcceptText}>
+                    {aiSafetyDecision === 'blocked'
+                      ? 'Đã khóa an toàn'
+                      : `Xả theo AI (${aiPredictedKg.toFixed(1)} kg)`}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={handlePredictAi}
+                  disabled={isPredictingAi}
+                  style={({ pressed }) => [
+                    styles.btnAiKeep,
+                    { opacity: pressed || isPredictingAi ? 0.8 : 1 },
+                  ]}>
+                  {isPredictingAi ? (
+                    <ActivityIndicator size="small" color="#9D4300" />
+                  ) : (
+                    <Text style={styles.btnAiKeepText}>Dự báo lại AI</Text>
+                  )}
+                </Pressable>
+              </View>
 
               {aiMeal?.isAiAccepted === undefined && (
-                <View style={styles.aiActionsRow}>
-                  <Pressable
-                    onPress={handleAiAccept}
-                    style={({ pressed }) => [
-                      styles.btnAiAccept,
-                      { opacity: pressed ? 0.9 : 1 },
-                    ]}>
-                    <MaterialIcons name="check" size={18} color="#FFFFFF" />
-                    <Text style={styles.btnAiAcceptText}>
-                      Xả theo AI ({aiPredictedKg.toFixed(1)} kg)
-                    </Text>
-                  </Pressable>
-
-                  <Pressable
-                    onPress={handleAiKeep}
-                    style={({ pressed }) => [
-                      styles.btnAiKeep,
-                      { opacity: pressed ? 0.9 : 1 },
-                    ]}>
-                    <Text style={styles.btnAiKeepText}>
-                      Giữ nguyên {aiMeal?.targetKg ?? 25} kg
-                    </Text>
-                  </Pressable>
-                </View>
+                <Pressable
+                  onPress={handleAiKeep}
+                  style={({ pressed }) => [
+                    styles.btnAiKeepSecondary,
+                    { opacity: pressed ? 0.85 : 1 },
+                  ]}>
+                  <Text style={styles.btnAiKeepText}>
+                    Giữ nguyên định mức ({aiMeal?.targetKg ?? 25} kg)
+                  </Text>
+                </Pressable>
               )}
             </View>
           ) : (
@@ -444,6 +722,22 @@ export default function ScreenFeedingLog() {
               <Text style={{ marginTop: 6, fontSize: 13, color: colors.onSurfaceVariant, fontWeight: '600' }}>
                 Chưa có khuyến nghị AI cho ao này
               </Text>
+              <Pressable
+                onPress={handlePredictAi}
+                disabled={isPredictingAi}
+                style={({ pressed }) => [
+                  styles.btnPredictEmpty,
+                  { opacity: pressed || isPredictingAi ? 0.8 : 1 },
+                ]}>
+                {isPredictingAi ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <MaterialIcons name="auto-awesome" size={16} color="#FFFFFF" />
+                    <Text style={styles.btnPredictEmptyText}>Chạy dự báo AI (XGBoost)</Text>
+                  </>
+                )}
+              </Pressable>
             </View>
           )}
 
@@ -579,6 +873,22 @@ export default function ScreenFeedingLog() {
                 onChangeText={handleChangeExtraKg}
                 placeholder="Ví dụ: 5.0"
               />
+              <Pressable
+                onPress={handleSuggestAiForQuickFeed}
+                disabled={isPredictingAi}
+                style={({ pressed }) => [
+                  styles.aiSuggestBtn,
+                  { opacity: pressed || isPredictingAi ? 0.75 : 1 },
+                ]}>
+                {isPredictingAi ? (
+                  <ActivityIndicator size="small" color="#EA580C" />
+                ) : (
+                  <MaterialIcons name="auto-awesome" size={16} color="#EA580C" />
+                )}
+                <Text style={styles.aiSuggestBtnText}>
+                  {isPredictingAi ? 'Đang chạy dự báo AI...' : 'Gợi ý lượng cám từ AI (XGBoost)'}
+                </Text>
+              </Pressable>
             </View>
 
             <View style={styles.inputGroup}>
@@ -687,6 +997,14 @@ export default function ScreenFeedingLog() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <SafetyBlockedModal
+        visible={blockedModalInfo.visible}
+        onClose={() => setBlockedModalInfo((prev) => ({ ...prev, visible: false }))}
+        pondName={pondDisplayName}
+        reasons={blockedModalInfo.reasons}
+        telemetrySnapshot={blockedModalInfo.telemetrySnapshot}
+      />
     </View>
   );
 }
@@ -1097,5 +1415,171 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     color: '#FFFFFF',
+  },
+  trendsBanner: {
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    gap: 6,
+  },
+  trendsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  trendsTitle: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#0B1C30',
+    letterSpacing: 0.3,
+  },
+  trendsBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.85)',
+  },
+  trendsBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#0B1C30',
+  },
+  trendsMetricsRow: {
+    flexDirection: 'row',
+    gap: 14,
+  },
+  trendsMetric: {
+    fontSize: 12,
+    color: '#334155',
+  },
+  trendsDesc: {
+    fontSize: 11,
+    color: '#475569',
+    lineHeight: 16,
+  },
+  aiModelSub: {
+    fontSize: 10,
+    color: '#64748B',
+    fontWeight: '600',
+  },
+  aiAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  aiBigKg: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#EA580C',
+  },
+  aiBigUnit: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#584237',
+  },
+  aiBaseNote: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '600',
+  },
+  aiSafetyNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 10,
+    padding: 8,
+  },
+  aiSafetyNoteText: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#991B1B',
+  },
+  shapSection: {
+    gap: 6,
+    marginTop: 2,
+  },
+  shapHeading: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#64748B',
+    letterSpacing: 0.4,
+  },
+  shapWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  shapPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  shapPillInc: {
+    backgroundColor: '#E8F5E9',
+    borderColor: '#7CF994',
+  },
+  shapPillDec: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  shapPillNeu: {
+    backgroundColor: '#F1F5F9',
+    borderColor: '#CBD5E1',
+  },
+  shapPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  btnAiKeepSecondary: {
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnPredictEmpty: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#EA580C',
+  },
+  btnPredictEmptyText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  aiSuggestBtn: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FDBA74',
+  },
+  aiSuggestBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#9D4300',
   },
 });

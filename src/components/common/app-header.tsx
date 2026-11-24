@@ -396,6 +396,13 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
                   const isResolved = status === 'resolved';
                   const isAck = status === 'acknowledged';
                   const isBusy = processingAlertId === item.id;
+                  const latestValue = item.metadata?.latestValue;
+                  const valueUnit = item.metadata?.unit;
+                  const repeatCount = Number(item.metadata?.repeatCount || 0);
+                  const recommendationText =
+                    item.aiRecommendation?.explanation ||
+                    item.metadata?.actionRecommendation ||
+                    item.suggestedAction;
 
                   return (
                     <View
@@ -473,6 +480,37 @@ export function AppHeader({ subtitle = 'Hệ Thống Bờ Ao' }: AppHeaderProps)
                           }>
                           {item.message}
                         </Text>
+
+                        {((latestValue !== undefined && latestValue !== null) ||
+                          repeatCount > 1) && (
+                          <View style={styles.alertMetaRow}>
+                            {latestValue !== undefined && latestValue !== null && (
+                              <View style={styles.alertMetaChip}>
+                                <Text style={styles.alertMetaChipText}>
+                                  Giá trị đo: {latestValue}
+                                  {valueUnit ? ` ${valueUnit}` : ''}
+                                </Text>
+                              </View>
+                            )}
+                            {repeatCount > 1 && (
+                              <View style={styles.alertRepeatChip}>
+                                <Text style={styles.alertRepeatChipText}>
+                                  Lặp lại lần #{repeatCount}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                        )}
+
+                        {!!recommendationText && (
+                          <View style={styles.alertRecBox}>
+                            <MaterialIcons name="lightbulb" size={14} color="#D97706" />
+                            <Text style={styles.alertRecText}>
+                              <Text style={{ fontWeight: '900' }}>Khuyến nghị: </Text>
+                              {recommendationText}
+                            </Text>
+                          </View>
+                        )}
 
                         {!isResolved && (
                           <View style={styles.alertActionRow}>
@@ -1056,5 +1094,55 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
     color: '#FFFFFF',
+  },
+  alertMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 2,
+  },
+  alertMetaChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  alertMetaChipText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#0B1C30',
+  },
+  alertRepeatChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+  },
+  alertRepeatChipText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#92400E',
+  },
+  alertRecBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 10,
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    marginTop: 2,
+  },
+  alertRecText: {
+    flex: 1,
+    fontSize: 11,
+    color: '#78350F',
+    lineHeight: 16,
   },
 });

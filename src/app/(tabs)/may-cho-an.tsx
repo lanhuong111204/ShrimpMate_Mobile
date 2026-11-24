@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -15,6 +15,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '@/hooks/use-theme';
 import { AppHeader } from '@/components/common/app-header';
 import { NoAssignedPondState } from '@/components/common/no-assigned-pond';
+import { SafetyBlockedModal } from '@/components/common/safety-blocked-modal';
 import { useFarm } from '@/context/farm-context';
 import { EvaluateSafetyResponse } from '@/types/safety-rule';
 
@@ -25,6 +26,8 @@ export default function ScreenLiveFeeder() {
     selectedPond,
     farmInfo,
     latestTelemetry,
+    predictedTrends,
+    requestAiFeedPrediction,
     feederDevice,
     lastSafetyEvaluation,
     evaluateSafetyBeforeFeed,
@@ -53,6 +56,23 @@ export default function ScreenLiveFeeder() {
   const [isEvaluatingSafety, setIsEvaluatingSafety] = useState(false);
   const [isTriggeringFeed, setIsTriggeringFeed] = useState(false);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+  const [isTogglingEStop, setIsTogglingEStop] = useState(false);
+  const [isPredictingQuickFeed, setIsPredictingQuickFeed] = useState(false);
+  const [blockedModalInfo, setBlockedModalInfo] = useState<{
+    visible: boolean;
+    reasons: string[];
+    telemetrySnapshot?: EvaluateSafetyResponse['telemetrySnapshot'] | null;
+  }>({ visible: false, reasons: [], telemetrySnapshot: null });
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const handlePullRefresh = async (refreshAction: () => Promise<void>) => {
     setIsManualRefreshing(true);
@@ -118,19 +138,61 @@ export default function ScreenLiveFeeder() {
     }
   };
 
-  const handleReEvaluateSafety = async (textVal: string) => {
+  const handleReEvaluateSafety = (textVal: string) => {
     setQuickFeedKg(textVal);
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
     const numKg = parseFloat(textVal);
     if (!isNaN(numKg) && numKg > 0) {
-      setIsEvaluatingSafety(true);
-      try {
-        const res = await evaluateSafetyBeforeFeed(numKg);
-        setSafetyPreview(res);
-      } catch {
-        setSafetyPreview(null);
-      } finally {
-        setIsEvaluatingSafety(false);
+      debounceTimerRef.current = setTimeout(async () => {
+        setIsEvaluatingSafety(true);
+        try {
+          const res = await evaluateSafetyBeforeFeed(numKg);
+          setSafetyPreview(res);
+        } catch {
+          setSafetyPreview(null);
+        } finally {
+          setIsEvaluatingSafety(false);
+        }
+      }, 300);
+    }
+  };
+
+  const handleSuggestAiQuickFeed = async () => {
+    if (isPredictingQuickFeed) return;
+    setIsPredictingQuickFeed(true);
+    try {
+      const res = await requestAiFeedPrediction();
+      if (!res) {
+        Alert.alert('Không thể lấy gợi ý AI', 'Chưa thể kết nối máy chủ dự báo AI. Vui lòng thử lại sau.');
+        return;
       }
+      const suggested = Number(res.safeAllowedAmountKg ?? res.predictedFeedAmountKg ?? 0);
+      if (suggested > 0) {
+        const nextVal = suggested.toFixed(1);
+        setQuickFeedKg(nextVal);
+        setIsEvaluatingSafety(true);
+        try {
+          const ev = await evaluateSafetyBeforeFeed(Number(nextVal));
+          setSafetyPreview(ev);
+        } finally {
+          setIsEvaluatingSafety(false);
+        }
+      } else if (res.safetyDecision === 'blocked') {
+        setShowQuickFeedModal(false);
+        setBlockedModalInfo({
+          visible: true,
+          reasons:
+            res.safetyReasons?.length > 0
+              ? res.safetyReasons
+              : ['AI / Safety Rule Engine đang khóa cho ăn do môi trường nước chưa đạt chuẩn.'],
+          telemetrySnapshot: null,
+        });
+      }
+    } finally {
+      setIsPredictingQuickFeed(false);
     }
   };
 
@@ -148,12 +210,24 @@ export default function ScreenLiveFeeder() {
 
       if (!result.success || result.evaluation.decision === 'blocked') {
         const isBlocked = result.isSafetyBlocked || result.evaluation.decision === 'blocked';
-        Alert.alert(
-          isBlocked ? '⛔ BỊ CHẶN BỞI SAFETY RULE ENGINE' : '❌ KHÔNG THỂ PHÁT LỆNH XẢ CÁM',
-          result.errorMessage ||
-            result.evaluation.reasons.join('\n') ||
-            'Chỉ số nước hiện tại không an toàn để xả thức ăn.'
-        );
+        if (isBlocked) {
+          setShowQuickFeedModal(false);
+          setBlockedModalInfo({
+            visible: true,
+            reasons:
+              result.evaluation.reasons?.length > 0
+                ? result.evaluation.reasons
+                : result.errorMessage
+                ? [result.errorMessage]
+                : ['Chỉ số nước hiện tại không an toàn để xả thức ăn.'],
+            telemetrySnapshot: result.evaluation.telemetrySnapshot || null,
+          });
+        } else {
+          Alert.alert(
+            '❌ KHÔNG THỂ PHÁT LỆNH XẢ CÁM',
+            result.errorMessage || 'Không thể gửi lệnh cho ăn tới máy chủ.'
+          );
+        }
         return;
       }
 
@@ -183,6 +257,20 @@ export default function ScreenLiveFeeder() {
     Alert.alert('Đang Phun Thử', 'Bắt đầu chu kỳ phun thử 10 giây kiểm tra góc văng cám...');
   };
 
+  const handleToggleEmergencyStop = async () => {
+    if (isTogglingEStop) return;
+    setIsTogglingEStop(true);
+    try {
+      if (isEmergencyStopped) {
+        await resetEmergencyStop();
+      } else {
+        await triggerEmergencyStop();
+      }
+    } finally {
+      setIsTogglingEStop(false);
+    }
+  };
+
   const safeDispensedKg = Number(dispensedKg) || 0;
   const safeTargetKg = Number(targetKg) || 0;
   const percent = safeTargetKg > 0 ? Math.min(100, Math.round((safeDispensedKg / safeTargetKg) * 100)) : 0;
@@ -195,6 +283,13 @@ export default function ScreenLiveFeeder() {
   );
   const doVal = hasTelemetry && latestTelemetry?.dissolvedOxygenMgL !== undefined ? Number(latestTelemetry.dissolvedOxygenMgL) : undefined;
   const phVal = hasTelemetry && latestTelemetry?.ph !== undefined ? Number(latestTelemetry.ph) : undefined;
+
+  const trendsRecommendationText =
+    typeof predictedTrends?.recommendation === 'string'
+      ? predictedTrends.recommendation
+      : predictedTrends?.recommendation?.explanation ||
+        predictedTrends?.reasons?.[0] ||
+        '';
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.surface }]}>
@@ -302,6 +397,34 @@ export default function ScreenLiveFeeder() {
                     : `Chưa có dữ liệu đo từ cảm biến`)}
             </Text>
           </View>
+
+          {/* Compact DO 2h Forecast Warning Banner */}
+          {predictedTrends &&
+            (predictedTrends.riskLevel === 'WARNING' ||
+              predictedTrends.riskLevel === 'CRITICAL') && (
+              <View
+                style={[
+                  styles.trendsAlertBox,
+                  {
+                    backgroundColor:
+                      predictedTrends.riskLevel === 'CRITICAL' ? '#FEF2F2' : '#FFFBEB',
+                    borderColor:
+                      predictedTrends.riskLevel === 'CRITICAL' ? '#FCA5A5' : '#FCD34D',
+                  },
+                ]}>
+                <MaterialIcons
+                  name="warning-amber"
+                  size={18}
+                  color={predictedTrends.riskLevel === 'CRITICAL' ? '#BA1A1A' : '#B45309'}
+                />
+                <Text style={styles.trendsAlertText}>
+                  <Text style={{ fontWeight: '900' }}>
+                    Dự báo DO +2h ({predictedTrends.predictedDo2h ?? '--'} mg/L):{' '}
+                  </Text>
+                  {trendsRecommendationText}
+                </Text>
+              </View>
+            )}
 
           {/* Main Feeder Circular Gauge Card */}
           <View
@@ -529,21 +652,28 @@ export default function ScreenLiveFeeder() {
 
           {/* 1-TAP EMERGENCY STOP BUTTON (POST /devices/:id/emergency-stop) */}
           <Pressable
-            onPress={isEmergencyStopped ? resetEmergencyStop : triggerEmergencyStop}
+            onPress={handleToggleEmergencyStop}
+            disabled={isTogglingEStop}
             style={({ pressed }) => [
               styles.emergencyBtn,
               {
                 backgroundColor: isEmergencyStopped ? '#006E2D' : '#BA1A1A',
-                opacity: pressed ? 0.9 : 1,
+                opacity: pressed || isTogglingEStop ? 0.8 : 1,
               },
             ]}>
-            <MaterialIcons
-              name={isEmergencyStopped ? 'restart-alt' : 'power-settings-new'}
-              size={28}
-              color="#FFFFFF"
-            />
+            {isTogglingEStop ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <MaterialIcons
+                name={isEmergencyStopped ? 'restart-alt' : 'power-settings-new'}
+                size={28}
+                color="#FFFFFF"
+              />
+            )}
             <Text style={styles.emergencyBtnText}>
-              {isEmergencyStopped
+              {isTogglingEStop
+                ? 'ĐANG GỬI LỆNH KHẨN CẤP...'
+                : isEmergencyStopped
                 ? 'KHÔI PHỤC NGUỒN MÁY ĂN (AUTOMATIC)'
                 : 'DỪNG KHẨN CẤP 1 CHẠM (EMERGENCY STOP)'}
             </Text>
@@ -578,6 +708,22 @@ export default function ScreenLiveFeeder() {
                 onChangeText={handleReEvaluateSafety}
                 placeholder="Nhập số kg (ví dụ: 5.0)"
               />
+              <Pressable
+                onPress={handleSuggestAiQuickFeed}
+                disabled={isPredictingQuickFeed}
+                style={({ pressed }) => [
+                  styles.aiSuggestBtn,
+                  { opacity: pressed || isPredictingQuickFeed ? 0.75 : 1 },
+                ]}>
+                {isPredictingQuickFeed ? (
+                  <ActivityIndicator size="small" color="#EA580C" />
+                ) : (
+                  <MaterialIcons name="auto-awesome" size={16} color="#EA580C" />
+                )}
+                <Text style={styles.aiSuggestBtnText}>
+                  {isPredictingQuickFeed ? 'Đang chạy dự báo AI...' : 'Gợi ý lượng cám từ AI (XGBoost)'}
+                </Text>
+              </Pressable>
             </View>
 
             {/* Safety Evaluation Result Box */}
@@ -682,6 +828,14 @@ export default function ScreenLiveFeeder() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <SafetyBlockedModal
+        visible={blockedModalInfo.visible}
+        onClose={() => setBlockedModalInfo((prev) => ({ ...prev, visible: false }))}
+        pondName={selectedPond?.name || selectedPond?.code}
+        reasons={blockedModalInfo.reasons}
+        telemetrySnapshot={blockedModalInfo.telemetrySnapshot}
+      />
     </View>
   );
 }
@@ -995,5 +1149,37 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '900',
     color: '#FFFFFF',
+  },
+  trendsAlertBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1.5,
+  },
+  trendsAlertText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#78350F',
+    lineHeight: 17,
+  },
+  aiSuggestBtn: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FDBA74',
+  },
+  aiSuggestBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#9D4300',
   },
 });
