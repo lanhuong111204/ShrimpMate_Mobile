@@ -5,6 +5,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { ErrorBoundary } from '@/components/common/error-boundary';
 import { AuthProvider, useAuth } from '@/context/auth-context';
 import { FarmProvider } from '@/context/farm-context';
 
@@ -51,14 +52,16 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   return (
-    <AuthProvider>
-      <FarmProvider>
-        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <AnimatedSplashOverlay />
-          <RootNavigator />
-        </ThemeProvider>
-      </FarmProvider>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <FarmProvider>
+          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+            <AnimatedSplashOverlay />
+            <RootNavigator />
+          </ThemeProvider>
+        </FarmProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 
