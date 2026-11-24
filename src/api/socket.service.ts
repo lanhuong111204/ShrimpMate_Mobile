@@ -76,6 +76,7 @@ class SocketService {
   private activePondId: string | null = null;
   private currentToken: string | null = null;
   private connectPromise: Promise<void> | null = null;
+  private reconnectAttemptHandler: (() => void) | null = null;
 
   private telemetryListeners = new Set<(payload: TelemetrySocketPayload) => void>();
   private feederStatusListeners = new Set<(payload: FeederStatusSocketPayload) => void>();
@@ -111,6 +112,10 @@ class SocketService {
         }
 
         if (this.socket) {
+          if (this.reconnectAttemptHandler) {
+            this.socket.io.off('reconnect_attempt', this.reconnectAttemptHandler);
+            this.reconnectAttemptHandler = null;
+          }
           this.socket.removeAllListeners();
           this.socket.disconnect();
           this.socket = null;
@@ -127,6 +132,25 @@ class SocketService {
           reconnectionDelay: 1000,
           reconnectionDelayMax: 10000,
         });
+
+        this.reconnectAttemptHandler = () => {
+          void (async () => {
+            try {
+              const latestToken = await Storage.getItem(AppConfig.storageKeys.authToken);
+              if (!latestToken || latestToken === 'offline_session_shrimpmate') {
+                return;
+              }
+              const nextRaw = latestToken.replace(/^Bearer\s+/i, '').trim();
+              if (nextRaw && this.socket === socket) {
+                this.currentToken = nextRaw;
+                socket.auth = { token: nextRaw };
+              }
+            } catch {
+              // Ignore storage read errors during reconnect attempt
+            }
+          })();
+        };
+        socket.io.on('reconnect_attempt', this.reconnectAttemptHandler);
 
         socket.on('connect', () => {
           if (this.activePondId) {
@@ -174,6 +198,10 @@ class SocketService {
     this.activePondId = null;
     this.currentToken = null;
     if (this.socket) {
+      if (this.reconnectAttemptHandler) {
+        this.socket.io.off('reconnect_attempt', this.reconnectAttemptHandler);
+        this.reconnectAttemptHandler = null;
+      }
       this.socket.removeAllListeners();
       this.socket.disconnect();
       this.socket = null;

@@ -240,6 +240,9 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
   const fetchSeqRef = useRef(0);
   const selectedPondIdRef = useRef<string | null>(null);
   const pondDevicesRef = useRef<Device[]>([]);
+  const latestTelemetryRef = useRef<TelemetryReading | null>(null);
+  const alertsRef = useRef<AlertItem[]>([]);
+  const dispensedKgRef = useRef<number>(0);
   const seenAlertIdsRef = useRef<Set<string>>(new Set());
   const seenAlertEventKeysRef = useRef<Set<string>>(new Set());
   const seenCompletedIdsRef = useRef<Set<string>>(new Set());
@@ -257,8 +260,23 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
     pondDevicesRef.current = pondDevices;
   }, [pondDevices]);
 
+  useEffect(() => {
+    latestTelemetryRef.current = latestTelemetry;
+  }, [latestTelemetry]);
+
+  useEffect(() => {
+    alertsRef.current = alerts;
+  }, [alerts]);
+
+  useEffect(() => {
+    dispensedKgRef.current = dispensedKg;
+  }, [dispensedKg]);
+
   const clearPondOperationalState = useCallback(() => {
     fetchSeqRef.current += 1;
+    latestTelemetryRef.current = null;
+    alertsRef.current = [];
+    dispensedKgRef.current = 0;
     setLatestTelemetry(null);
     setLatestAiRecommendation(null);
     setPredictedTrends(null);
@@ -312,6 +330,7 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
         if (seq !== fetchSeqRef.current) return;
 
         // 1. Cập nhật Telemetry 6 chỉ số
+        latestTelemetryRef.current = telemetry;
         setLatestTelemetry(telemetry);
         if (telemetry) {
           setFarmInfo((prev) => ({
@@ -406,9 +425,12 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
 
         const activeRec = records.find((r) => r.status === 'running') || records[0];
         if (activeRec) {
-          setDispensedKg(Number(activeRec.actualAmountKg) || 0);
+          const nextDispensed = Number(activeRec.actualAmountKg) || 0;
+          dispensedKgRef.current = nextDispensed;
+          setDispensedKg(nextDispensed);
           setTargetKg(Number(activeRec.requestedAmountKg) || 0);
         } else {
+          dispensedKgRef.current = 0;
           setDispensedKg(0);
           setTargetKg(0);
         }
@@ -420,6 +442,7 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
             seenAlertEventKeysRef.current.add(`${a.id}:${a.status ?? 'open'}`);
           }
         });
+        alertsRef.current = pondAlerts;
         setAlerts(pondAlerts);
         setAlertSummary(summary);
 
@@ -555,61 +578,60 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
     const unsubTelemetry = socketService.onTelemetry((payload: TelemetrySocketPayload) => {
       if (!payload || payload.pondId !== selectedPondIdRef.current) return;
 
-      setLatestTelemetry((prev) => {
-        const nextReading: TelemetryReading = {
-          id: String(payload.readingId ?? payload.id ?? prev?.id ?? `ws-${Date.now()}`),
-          pondId: String(payload.pondId),
-          deviceId: String(payload.deviceId ?? prev?.deviceId ?? ''),
-          measuredAt: String(payload.measuredAt ?? payload.emittedAt ?? new Date().toISOString()),
-          ph:
-            payload.ph !== undefined && payload.ph !== null
-              ? Number(payload.ph)
-              : (prev?.ph ?? 0),
-          dissolvedOxygenMgL:
-            payload.dissolvedOxygenMgL !== undefined && payload.dissolvedOxygenMgL !== null
-              ? Number(payload.dissolvedOxygenMgL)
-              : payload.do !== undefined && payload.do !== null
-              ? Number(payload.do)
-              : (prev?.dissolvedOxygenMgL ?? 0),
-          temperatureC:
-            payload.temperatureC !== undefined && payload.temperatureC !== null
-              ? Number(payload.temperatureC)
-              : payload.temperature !== undefined && payload.temperature !== null
-              ? Number(payload.temperature)
-              : (prev?.temperatureC ?? 0),
-          salinityPpt:
-            payload.salinityPpt !== undefined && payload.salinityPpt !== null
-              ? Number(payload.salinityPpt)
-              : payload.salinity !== undefined && payload.salinity !== null
-              ? Number(payload.salinity)
-              : (prev?.salinityPpt ?? 0),
-          ammoniaMgL:
-            payload.ammoniaMgL !== undefined && payload.ammoniaMgL !== null
-              ? Number(payload.ammoniaMgL)
-              : payload.nh3 !== undefined && payload.nh3 !== null
-              ? Number(payload.nh3)
-              : (prev?.ammoniaMgL ?? 0),
-          turbidityNtu:
-            payload.turbidityNtu !== undefined && payload.turbidityNtu !== null
-              ? Number(payload.turbidityNtu)
-              : payload.turbidity !== undefined && payload.turbidity !== null
-              ? Number(payload.turbidity)
-              : (prev?.turbidityNtu ?? 0),
-        };
+      const prev = latestTelemetryRef.current;
+      const nextReading: TelemetryReading = {
+        id: String(payload.readingId ?? payload.id ?? prev?.id ?? `ws-${Date.now()}`),
+        pondId: String(payload.pondId),
+        deviceId: String(payload.deviceId ?? prev?.deviceId ?? ''),
+        measuredAt: String(payload.measuredAt ?? payload.emittedAt ?? new Date().toISOString()),
+        ph:
+          payload.ph !== undefined && payload.ph !== null
+            ? Number(payload.ph)
+            : (prev?.ph ?? 0),
+        dissolvedOxygenMgL:
+          payload.dissolvedOxygenMgL !== undefined && payload.dissolvedOxygenMgL !== null
+            ? Number(payload.dissolvedOxygenMgL)
+            : payload.do !== undefined && payload.do !== null
+            ? Number(payload.do)
+            : (prev?.dissolvedOxygenMgL ?? 0),
+        temperatureC:
+          payload.temperatureC !== undefined && payload.temperatureC !== null
+            ? Number(payload.temperatureC)
+            : payload.temperature !== undefined && payload.temperature !== null
+            ? Number(payload.temperature)
+            : (prev?.temperatureC ?? 0),
+        salinityPpt:
+          payload.salinityPpt !== undefined && payload.salinityPpt !== null
+            ? Number(payload.salinityPpt)
+            : payload.salinity !== undefined && payload.salinity !== null
+            ? Number(payload.salinity)
+            : (prev?.salinityPpt ?? 0),
+        ammoniaMgL:
+          payload.ammoniaMgL !== undefined && payload.ammoniaMgL !== null
+            ? Number(payload.ammoniaMgL)
+            : payload.nh3 !== undefined && payload.nh3 !== null
+            ? Number(payload.nh3)
+            : (prev?.ammoniaMgL ?? 0),
+        turbidityNtu:
+          payload.turbidityNtu !== undefined && payload.turbidityNtu !== null
+            ? Number(payload.turbidityNtu)
+            : payload.turbidity !== undefined && payload.turbidity !== null
+            ? Number(payload.turbidity)
+            : (prev?.turbidityNtu ?? 0),
+      };
 
-        setFarmInfo((info) => ({
-          ...info,
-          waterTemp: nextReading.temperatureC,
-          dissolvedOxygen: nextReading.dissolvedOxygenMgL,
-          ph: nextReading.ph,
-          salinity: nextReading.salinityPpt,
-          nh3: nextReading.ammoniaMgL,
-          turbidity: nextReading.turbidityNtu,
-          measuredAt: nextReading.measuredAt,
-        }));
-
-        return nextReading;
-      });
+      latestTelemetryRef.current = nextReading;
+      setLatestTelemetry(nextReading);
+      setFarmInfo((info) => ({
+        ...info,
+        waterTemp: nextReading.temperatureC,
+        dissolvedOxygen: nextReading.dissolvedOxygenMgL,
+        ph: nextReading.ph,
+        salinity: nextReading.salinityPpt,
+        nh3: nextReading.ammoniaMgL,
+        turbidity: nextReading.turbidityNtu,
+        measuredAt: nextReading.measuredAt,
+      }));
     });
 
     const unsubFeederStatus = socketService.onFeederStatus(
@@ -627,10 +649,10 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
           if (!belongsToPond) return;
         }
 
-        if (payload.mode || payload.command === 'STOP') {
-          const nextMode = (
-            payload.command === 'STOP' ? 'emergency_stop' : payload.mode
-          ) as DeviceMode;
+        const isEmergencyCmd =
+          payload.command === 'STOP' || payload.command === 'EMERGENCY_STOP';
+        if (payload.mode || isEmergencyCmd) {
+          const nextMode = (isEmergencyCmd ? 'emergency_stop' : payload.mode) as DeviceMode;
           setPondDevices((prev) =>
             prev.map((d) => {
               const matches =
@@ -675,7 +697,9 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
           });
 
           if (payload.actualAmountKg !== undefined && payload.actualAmountKg !== null) {
-            setDispensedKg(Number(payload.actualAmountKg) || 0);
+            const nextDispensed = Number(payload.actualAmountKg) || 0;
+            dispensedKgRef.current = nextDispensed;
+            setDispensedKg(nextDispensed);
           }
         }
       }
@@ -686,30 +710,32 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
         if (!payload) return;
         if (payload.pondId && payload.pondId !== selectedPondIdRef.current) return;
 
+        const matchesDevice = (d: Device) =>
+          d.id === payload.deviceId ||
+          (Boolean(payload.deviceUid) && d.deviceUid === payload.deviceUid);
+
+        const matchedFeeder = pondDevicesRef.current.find(
+          (d) => d.type === 'feeder' && matchesDevice(d)
+        );
+
         setPondDevices((prev) =>
           prev.map((d) => {
-            const matches =
-              d.id === payload.deviceId ||
-              (payload.deviceUid && d.deviceUid === payload.deviceUid);
-            if (!matches) return d;
-
-            const updatedDevice: Device = {
+            if (!matchesDevice(d)) return d;
+            return {
               ...d,
               ...(payload.status ? { status: payload.status as DeviceStatus } : {}),
               ...(payload.mode ? { mode: payload.mode as DeviceMode } : {}),
               ...(payload.lastSeenAt !== undefined ? { lastSeenAt: payload.lastSeenAt } : {}),
             };
-
-            if (updatedDevice.type === 'feeder' && payload.mode) {
-              setIsEmergencyStopped(payload.mode === 'emergency_stop');
-              setFeederPaused(
-                payload.mode === 'manual' || payload.mode === 'emergency_stop'
-              );
-            }
-
-            return updatedDevice;
           })
         );
+
+        if (matchedFeeder && payload.mode) {
+          setIsEmergencyStopped(payload.mode === 'emergency_stop');
+          setFeederPaused(
+            payload.mode === 'manual' || payload.mode === 'emergency_stop'
+          );
+        }
       }
     );
 
@@ -746,18 +772,18 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
       }
       seenAlertIdsRef.current.add(alert.id);
 
-      setAlerts((prev) => {
-        const existingIndex = prev.findIndex((a) => a.id === alert.id);
-        let nextAlerts: AlertItem[];
-        if (existingIndex !== -1) {
-          nextAlerts = [...prev];
-          nextAlerts[existingIndex] = { ...prev[existingIndex], ...alert };
-        } else {
-          nextAlerts = [alert, ...prev];
-        }
-        setAlertSummary(computeAlertSummaryFromList(nextAlerts));
-        return nextAlerts;
-      });
+      const prevAlerts = alertsRef.current;
+      const existingIndex = prevAlerts.findIndex((a) => a.id === alert.id);
+      let nextAlerts: AlertItem[];
+      if (existingIndex !== -1) {
+        nextAlerts = [...prevAlerts];
+        nextAlerts[existingIndex] = { ...prevAlerts[existingIndex], ...alert };
+      } else {
+        nextAlerts = [alert, ...prevAlerts];
+      }
+      alertsRef.current = nextAlerts;
+      setAlerts(nextAlerts);
+      setAlertSummary(computeAlertSummaryFromList(nextAlerts));
 
       // Không phát âm thanh / popup cảnh báo nếu là bản tin đệm khi mất kết nối (isBuffered)
       if (isBrandNewAlert && alert.isBuffered !== true) {
@@ -981,11 +1007,10 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
           };
         }
 
-        setDispensedKg((prev) => {
-          const updated = Number((prev + finalKg).toFixed(1));
-          setTargetKg((prevTarget) => Math.max(prevTarget, updated));
-          return updated;
-        });
+        const nextDispensed = Number((dispensedKgRef.current + finalKg).toFixed(1));
+        dispensedKgRef.current = nextDispensed;
+        setDispensedKg(nextDispensed);
+        setTargetKg((prevTarget) => Math.max(prevTarget, nextDispensed));
 
         const newMeal: FeedingMeal = {
           id: record.id || `meal-quick-${Date.now()}`,
