@@ -78,6 +78,7 @@ export const Endpoints = {
   // 7. Feeding Schedules & Records (/feeding-schedules & /ponds/:pondId/feeding-records)
   feedings: {
     schedules: (pondId: string) => `/ponds/${pondId}/feeding-schedules`,
+    scheduleRecommendation: (pondId: string) => `/ponds/${pondId}/feeding-schedules/recommendation`,
     createSchedule: (pondId: string) => `/ponds/${pondId}/feeding-schedules`,
     updateSchedule: (id: string) => `/feeding-schedules/${id}`,
     deleteSchedule: (id: string) => `/feeding-schedules/${id}`,
@@ -93,18 +94,7 @@ export const Endpoints = {
     ingest: (pondId: string) => `/ponds/${pondId}/telemetry`,
   },
 
-  // 9. Camera Computer Vision & Feeding Intensity (FIS) (/camera)
-  camera: {
-    latestFis: (pondId: string) => `/camera/ponds/${pondId}/latest-fis`,
-    fisHistory: (pondId: string) => `/camera/ponds/${pondId}/fis-history`,
-    devices: (pondId: string) => `/camera/ponds/${pondId}/devices`,
-    analyze: '/camera/analyze',
-    ingestMetrics: '/camera/ingest-metrics',
-    updateRoi: (deviceId: string) => `/camera/devices/${deviceId}/roi`,
-    updateWeights: (pondId: string) => `/camera/ponds/${pondId}/weights`,
-  },
-
-  // 10. AI Recommendations (/ponds/:pondId/ai)
+  // 9. AI Recommendations (/ponds/:pondId/ai)
   ai: {
     recommendationsLatest: (pondId: string) => `/ponds/${pondId}/ai/recommendations/latest`,
     recommendationsHistory: (pondId: string) => `/ponds/${pondId}/ai/recommendations`,

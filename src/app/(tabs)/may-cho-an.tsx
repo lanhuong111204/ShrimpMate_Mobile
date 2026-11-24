@@ -147,9 +147,11 @@ export default function ScreenLiveFeeder() {
       setSafetyPreview(result.evaluation);
 
       if (!result.success || result.evaluation.decision === 'blocked') {
+        const isBlocked = result.isSafetyBlocked || result.evaluation.decision === 'blocked';
         Alert.alert(
-          '⛔ BỊ CHẶN BỞI SAFETY RULE ENGINE',
-          result.evaluation.reasons.join('\n') ||
+          isBlocked ? '⛔ BỊ CHẶN BỞI SAFETY RULE ENGINE' : '❌ KHÔNG THỂ PHÁT LỆNH XẢ CÁM',
+          result.errorMessage ||
+            result.evaluation.reasons.join('\n') ||
             'Chỉ số nước hiện tại không an toàn để xả thức ăn.'
         );
         return;

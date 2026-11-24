@@ -1,22 +1,19 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   StyleSheet,
   Text,
   View,
   ScrollView,
   Pressable,
-  ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import { useTheme } from '@/hooks/use-theme';
 import { AppHeader } from '@/components/common/app-header';
 import { NoAssignedPondState } from '@/components/common/no-assigned-pond';
 import { useFarm } from '@/context/farm-context';
 import { evaluateWaterMetricStatus } from '@/api/services/pond.service';
 import { StatusLevel } from '@/types/pond';
-import { AppetiteLevel } from '@/types/camera';
 
 function getGaugeColors(status: StatusLevel | 'empty') {
   switch (status) {
@@ -51,32 +48,27 @@ function getGaugeColors(status: StatusLevel | 'empty') {
   }
 }
 
-const FIS_LEVELS: { level: AppetiteLevel; code: string; label: string; sub: string }[] = [
-  { level: 0, code: 'Mức 0', label: 'Không ăn', sub: 'Dư cám nhiều' },
-  { level: 1, code: 'Mức 1', label: 'Ăn yếu', sub: 'Sót cám nhá' },
-  { level: 2, code: 'Mức 2', label: 'Bình thường', sub: 'Tiêu thụ ổn' },
-  { level: 3, code: 'Mức 3', label: 'Ăn mạnh', sub: 'Sạch nhá' },
-];
-
 export default function ScreenTrayWater() {
   const colors = useTheme();
   const {
     ponds,
     selectedPond,
     latestTelemetry,
-    latestFis,
-    fisAppetiteLevel,
-    setFisAppetiteLevel,
-    trayCleanPercent,
-    isScanningTray,
-    scanTray,
     isRefreshingPondData,
     refreshPondOperationalData,
     refreshFarmsAndPonds,
   } = useFarm();
 
-  const [manualFisSelected, setManualFisSelected] = React.useState<boolean>(false);
-  const [isManualRefreshing, setIsManualRefreshing] = React.useState<boolean>(false);
+  const [isManualRefreshing, setIsManualRefreshing] = useState<boolean>(false);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    setNowMs(Date.now());
+    const timer = setInterval(() => {
+      setNowMs(Date.now());
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [latestTelemetry?.measuredAt]);
 
   const handlePullRefresh = async (refreshAction: () => Promise<void>) => {
     setIsManualRefreshing(true);
@@ -87,30 +79,57 @@ export default function ScreenTrayWater() {
     }
   };
 
-  React.useEffect(() => {
-    setManualFisSelected(false);
-  }, [selectedPond?.id]);
-
   const hasAssignedPond = Boolean(selectedPond && ponds.length > 0);
   const pondDisplayName = selectedPond?.name || selectedPond?.code || 'Không có ao giám sát';
 
   // 6 chỉ số nước thực tế từ GET /ponds/:pondId/telemetry/latest
   const hasTelemetry = Boolean(
-    latestTelemetry && latestTelemetry.ph !== undefined && latestTelemetry.ph !== null && !isNaN(Number(latestTelemetry.ph))
+    latestTelemetry &&
+      latestTelemetry.ph !== undefined &&
+      latestTelemetry.ph !== null &&
+      !isNaN(Number(latestTelemetry.ph))
   );
-  const doVal = hasTelemetry && latestTelemetry?.dissolvedOxygenMgL !== undefined ? Number(latestTelemetry.dissolvedOxygenMgL) : undefined;
-  const phVal = hasTelemetry && latestTelemetry?.ph !== undefined ? Number(latestTelemetry.ph) : undefined;
-  const tempVal = hasTelemetry && latestTelemetry?.temperatureC !== undefined ? Number(latestTelemetry.temperatureC) : undefined;
-  const salVal = hasTelemetry && latestTelemetry?.salinityPpt !== undefined ? Number(latestTelemetry.salinityPpt) : undefined;
-  const nh3Val = hasTelemetry && latestTelemetry?.ammoniaMgL !== undefined ? Number(latestTelemetry.ammoniaMgL) : undefined;
-  const turbVal = hasTelemetry && latestTelemetry?.turbidityNtu !== undefined ? Number(latestTelemetry.turbidityNtu) : undefined;
-  const measuredTimeStr = latestTelemetry?.measuredAt
-    ? new Date(latestTelemetry.measuredAt).toLocaleTimeString('vi-VN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      })
-    : 'Chưa có dữ liệu đo';
+  const doVal =
+    hasTelemetry && latestTelemetry?.dissolvedOxygenMgL !== undefined
+      ? Number(latestTelemetry.dissolvedOxygenMgL)
+      : undefined;
+  const phVal =
+    hasTelemetry && latestTelemetry?.ph !== undefined ? Number(latestTelemetry.ph) : undefined;
+  const tempVal =
+    hasTelemetry && latestTelemetry?.temperatureC !== undefined
+      ? Number(latestTelemetry.temperatureC)
+      : undefined;
+  const salVal =
+    hasTelemetry && latestTelemetry?.salinityPpt !== undefined
+      ? Number(latestTelemetry.salinityPpt)
+      : undefined;
+  const nh3Val =
+    hasTelemetry && latestTelemetry?.ammoniaMgL !== undefined
+      ? Number(latestTelemetry.ammoniaMgL)
+      : undefined;
+  const turbVal =
+    hasTelemetry && latestTelemetry?.turbidityNtu !== undefined
+      ? Number(latestTelemetry.turbidityNtu)
+      : undefined;
+
+  const measuredDate = latestTelemetry?.measuredAt
+    ? new Date(latestTelemetry.measuredAt)
+    : null;
+  const isValidMeasuredDate = Boolean(measuredDate && Number.isFinite(measuredDate.getTime()));
+  const readingAgeMinutes =
+    hasTelemetry && isValidMeasuredDate && measuredDate
+      ? Math.max(0, Math.floor((nowMs - measuredDate.getTime()) / 60000))
+      : null;
+  const isTelemetryStale = Boolean(
+    hasTelemetry && readingAgeMinutes !== null && readingAgeMinutes > 30
+  );
+  const measuredTimeStr =
+    isValidMeasuredDate && measuredDate
+      ? measuredDate.toLocaleTimeString('vi-VN', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : 'Chưa có dữ liệu đo';
 
   // Đánh giá màu sắc chuẩn theo Quy tắc 3 (Xanh: optimal, Vàng: warning, Đỏ: critical, Xám: empty)
   const doStatus: StatusLevel | 'empty' =
@@ -118,13 +137,17 @@ export default function ScreenTrayWater() {
   const phStatus: StatusLevel | 'empty' =
     hasTelemetry && phVal !== undefined ? evaluateWaterMetricStatus('ph', phVal) : 'empty';
   const tempStatus: StatusLevel | 'empty' =
-    hasTelemetry && tempVal !== undefined ? evaluateWaterMetricStatus('temperature', tempVal) : 'empty';
+    hasTelemetry && tempVal !== undefined
+      ? evaluateWaterMetricStatus('temperature', tempVal)
+      : 'empty';
   const salStatus: StatusLevel | 'empty' =
     hasTelemetry && salVal !== undefined ? evaluateWaterMetricStatus('salinity', salVal) : 'empty';
   const nh3Status: StatusLevel | 'empty' =
     hasTelemetry && nh3Val !== undefined ? evaluateWaterMetricStatus('nh3', nh3Val) : 'empty';
   const turbStatus: StatusLevel | 'empty' =
-    hasTelemetry && turbVal !== undefined ? evaluateWaterMetricStatus('turbidity', turbVal) : 'empty';
+    hasTelemetry && turbVal !== undefined
+      ? evaluateWaterMetricStatus('turbidity', turbVal)
+      : 'empty';
 
   const hasCriticalWater =
     hasTelemetry && (doStatus === 'critical' || phStatus === 'critical' || nh3Status === 'critical');
@@ -132,15 +155,6 @@ export default function ScreenTrayWater() {
     hasTelemetry &&
     !hasCriticalWater &&
     (doStatus === 'warning' || phStatus === 'warning' || nh3Status === 'warning');
-
-  // Dữ liệu Camera FIS từ GET /camera/ponds/:pondId/latest-fis
-  const hasFisData = Boolean(latestFis && latestFis.hasData && latestFis.status);
-  const fisScore =
-    latestFis?.status?.fisScore !== undefined ? Number(latestFis.status.fisScore) : undefined;
-  const remainingFeedPct = latestFis?.status?.remainingFeedPercent;
-  const shrimpDensity = latestFis?.status?.shrimpDensity;
-  const ageSeconds = latestFis?.status?.ageSeconds ?? 0;
-  const isCameraStale = Boolean(hasFisData && (latestFis?.status?.isStale || ageSeconds > 120));
 
   const doTheme = getGaugeColors(doStatus);
   const phTheme = getGaugeColors(phStatus);
@@ -152,7 +166,7 @@ export default function ScreenTrayWater() {
   if (!hasAssignedPond) {
     return (
       <View style={[styles.screen, { backgroundColor: colors.surface }]}>
-        <AppHeader subtitle="Giám Sát & Nhá Ăn" />
+        <AppHeader subtitle="Giám Sát Môi Trường Nước" />
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -174,7 +188,7 @@ export default function ScreenTrayWater() {
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.surface }]}>
-      <AppHeader subtitle="Giám Sát & Nhá Ăn" />
+      <AppHeader subtitle="Giám Sát Môi Trường Nước" />
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -196,7 +210,7 @@ export default function ScreenTrayWater() {
                 backgroundColor: colors.surfaceContainerLow,
                 borderColor: hasCriticalWater
                   ? '#BA1A1A'
-                  : hasWarningWater
+                  : hasWarningWater || isTelemetryStale
                   ? '#F59E0B'
                   : colors.outlineVariant + '40',
               },
@@ -210,14 +224,19 @@ export default function ScreenTrayWater() {
                       ? '#94A3B8'
                       : hasCriticalWater
                       ? '#BA1A1A'
-                      : hasWarningWater
+                      : hasWarningWater || isTelemetryStale
                       ? '#F59E0B'
                       : '#006E2D',
                   },
                 ]}
               />
               <Text style={[styles.statusText, { color: colors.onSurfaceVariant }]}>
-                {pondDisplayName} • {hasTelemetry ? `Đo lúc ${measuredTimeStr}` : 'Chưa có dữ liệu đo'}
+                {pondDisplayName} •{' '}
+                {hasTelemetry && readingAgeMinutes !== null
+                  ? `Cập nhật lúc: ${measuredTimeStr} (Cách đây ${readingAgeMinutes} phút)`
+                  : hasTelemetry
+                  ? `Cập nhật lúc: ${measuredTimeStr}`
+                  : 'Chưa có dữ liệu đo'}
               </Text>
             </View>
             <View
@@ -278,225 +297,29 @@ export default function ScreenTrayWater() {
             </View>
           </View>
 
-          {/* AI Camera & Tray Assessment Card (UC014, UC019) */}
-          <View
-            style={[
-              styles.trayCard,
-              {
-                backgroundColor: colors.surfaceContainerLowest,
-                borderColor: isCameraStale ? '#F59E0B' : colors.outlineVariant + '40',
-              },
-            ]}>
-            {/* Stale Warning Banner (> 120s) - Quy tắc 3 */}
-            {isCameraStale && (
-              <View style={styles.staleWarningBanner}>
-                <MaterialIcons name="warning-amber" size={18} color="#92400E" />
-                <Text style={styles.staleWarningText}>
-                  Mất tín hiệu Camera (&gt; 120s) • Ảnh cuối cách đây {ageSeconds}s
-                </Text>
-              </View>
-            )}
-
-            {/* Viewport Image with AI Overlays */}
-            <View style={styles.cameraViewport}>
-              {hasFisData ? (
-                <>
-                  <Image
-                    source={{
-                      uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDZ5YhCPxPklKToJ8k-wu5XIXNzq3YF7WcI0NUdVhyhmXEaEIm5WD86Qe2e5hMoZkVTI126NEAMzsfFDAz5lTGDRRnj3tqPSuiMLxpg9yEpeBXns6aKoTnEzsTYbPYylJW0VV-73SyheKRqDihZjZwfeU7PLav6P-5bzh9baBXA1OOhJbXSThUN6NtR_3dHYiU1_2xoAXsKzQYOWl4_zUc0OSTawSHR5Ata6bCYlNGUDTtp8W42WWWfxQ',
-                    }}
-                    style={styles.trayImg}
-                    contentFit="cover"
-                  />
-
-                  {/* Floating Top AI Tag */}
-                  <View style={styles.floatingAiTag}>
-                    <MaterialIcons name="auto-awesome" size={16} color="#7FFC97" />
-                    <Text style={styles.floatingAiTagText}>
-                      {fisScore !== undefined ? (
-                        <>
-                          YOLO11n + MobileNetV3 • FIS:{' '}
-                          <Text style={{ fontWeight: '900', color: '#7FFC97' }}>
-                            {fisScore.toFixed(2)}
-                          </Text>{' '}
-                          • Cám dư: <Text style={{ fontWeight: '900' }}>{remainingFeedPct}%</Text>
-                        </>
-                      ) : (
-                        'Đang phân tích sàng ăn'
-                      )}
-                    </Text>
-                  </View>
-
-                  {/* Floating Freshness Pill */}
-                  <View
-                    style={[
-                      styles.freshnessPill,
-                      {
-                        backgroundColor: isCameraStale
-                          ? 'rgba(245, 158, 11, 0.95)'
-                          : 'rgba(0, 110, 45, 0.9)',
-                      },
-                    ]}>
-                    <MaterialIcons
-                      name={
-                        isCameraStale
-                          ? 'signal-wifi-statusbar-connected-no-internet-4'
-                          : 'videocam'
-                      }
-                      size={13}
-                      color="#FFFFFF"
-                    />
-                    <Text style={styles.freshnessPillText}>
-                      {isCameraStale
-                        ? 'Mất tín hiệu Camera (> 120s)'
-                        : `Live • ${ageSeconds}s trước`}
-                    </Text>
-                  </View>
-
-                  {/* Floating Bottom Activity Tag */}
-                  <View style={styles.floatingBottomTag}>
-                    <View style={styles.activityIcon}>
-                      <MaterialIcons name="psychology" size={16} color="#FFFFFF" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.activityTitle}>
-                        Cường độ bắt mồi:{' '}
-                        {latestFis?.status?.appetiteLevelDescription ||
-                          `Mức ${fisAppetiteLevel} (${FIS_LEVELS[fisAppetiteLevel]?.label})`}
-                      </Text>
-                      <Text style={styles.activitySub}>
-                        {selectedPond?.code ? `${selectedPond.code} • ` : ''}
-                        Mật độ: {shrimpDensity ?? 0} con • Độ sạch nhá: {trayCleanPercent}%
-                      </Text>
-                    </View>
-                  </View>
-                </>
-              ) : (
-                <View style={styles.emptyCameraContainer}>
-                  <View style={styles.emptyCameraIconCircle}>
-                    <MaterialIcons name="videocam-off" size={32} color="#94A3B8" />
-                  </View>
-                  <Text style={styles.emptyCameraTitle}>
-                    Chưa có dữ liệu hình ảnh sàng ăn
-                  </Text>
-                  <Text style={styles.emptyCameraSub}>
-                    {selectedPond?.name || selectedPond?.code || 'Ao nuôi'} • Nhấn nút bên dưới để chụp & phân tích nhá ăn
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            {/* Scan Action Button */}
-            <Pressable
-              onPress={scanTray}
-              disabled={isScanningTray}
-              style={({ pressed }) => [
-                styles.btnScanTray,
-                { opacity: pressed || isScanningTray ? 0.85 : 1 },
-              ]}>
-              {isScanningTray ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
-              ) : (
-                <>
-                  <MaterialIcons name="camera-alt" size={20} color="#FFFFFF" />
-                  <Text style={styles.btnScanTrayText}>
-                    CHỤP ẢNH / PHÂN TÍCH NHÁ MỚI BẰNG AI
-                  </Text>
-                </>
-              )}
-            </Pressable>
-          </View>
-
-          {/* 4-Level FIS Appetite Selector Strip (0: Không ăn, 1: Ăn yếu, 2: Bình thường, 3: Ăn mạnh) */}
-          <View
-            style={[
-              styles.appetiteCard,
-              {
-                backgroundColor: colors.surfaceContainerLowest,
-                borderColor: colors.outlineVariant + '40',
-              },
-            ]}>
-            <View style={styles.appetiteHeaderRow}>
-              <Text style={[styles.appetiteHeading, { color: colors.onSurface }]}>
-                ĐÁNH GIÁ SỨC ĂN TRÊN NHÁ (FIS)
-              </Text>
-              <Text style={styles.fisScoreTag}>
-                {hasFisData && fisScore !== undefined ? `FIS = ${fisScore.toFixed(2)}` : 'FIS = --'}
+          {/* Stale Telemetry Warning Banner (> 30 phút) */}
+          {isTelemetryStale && (
+            <View style={styles.staleWarningBanner}>
+              <MaterialIcons name="warning-amber" size={20} color="#92400E" />
+              <Text style={styles.staleWarningText}>
+                ⚠️ Dữ liệu trạm đo đã quá cũ (&gt;30 phút). Vui lòng kiểm tra lại thiết bị ngoài ao!
               </Text>
             </View>
-            <View style={styles.appetiteButtons}>
-              {FIS_LEVELS.map((item) => {
-                const isSelected =
-                  (hasFisData || manualFisSelected) && fisAppetiteLevel === item.level;
-                const activeBg =
-                  item.level === 0
-                    ? '#FFDAD6'
-                    : item.level === 1
-                    ? '#FEF3C7'
-                    : item.level === 2
-                    ? '#E0F2FE'
-                    : '#E8F5E9';
-                const activeBorder =
-                  item.level === 0
-                    ? '#BA1A1A'
-                    : item.level === 1
-                    ? '#F59E0B'
-                    : item.level === 2
-                    ? '#0284C7'
-                    : '#006E2D';
-                const activeColor =
-                  item.level === 0
-                    ? '#93000A'
-                    : item.level === 1
-                    ? '#92400E'
-                    : item.level === 2
-                    ? '#0369A1'
-                    : '#006E2D';
-
-                return (
-                  <Pressable
-                    key={item.level}
-                    onPress={() => {
-                      setManualFisSelected(true);
-                      setFisAppetiteLevel(item.level);
-                    }}
-                    style={[
-                      styles.appetiteBtn,
-                      isSelected && {
-                        backgroundColor: activeBg,
-                        borderColor: activeBorder,
-                        borderWidth: 1.5,
-                      },
-                    ]}>
-                    <Text
-                      style={[
-                        styles.appetiteCode,
-                        isSelected && { color: activeColor, fontWeight: '900' },
-                      ]}>
-                      {item.code}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.appetiteText,
-                        isSelected && { color: activeColor, fontWeight: '900' },
-                      ]}>
-                      {item.label}
-                    </Text>
-                    <Text style={styles.appetiteSub}>{item.sub}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
+          )}
 
           {/* 6-Water Metrics Real-Time Dashboard (Telemetry Gauges - UC013) */}
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: colors.onSurface }]}>
               6 CHỈ SỐ MÔI TRƯỜNG NƯỚC (TELEMETRY GAUGES)
             </Text>
-            <Pressable onPress={refreshPondOperationalData} style={styles.syncRow}>
+            <Pressable
+              onPress={refreshPondOperationalData}
+              disabled={isRefreshingPondData}
+              style={styles.syncRow}>
               <MaterialIcons name="sync" size={14} color="#006E2D" />
-              <Text style={styles.sensorStatus}>Làm mới</Text>
+              <Text style={styles.sensorStatus}>
+                {isRefreshingPondData ? 'Đang tải...' : 'Làm mới'}
+              </Text>
             </Pressable>
           </View>
 
@@ -737,205 +560,23 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
   },
-  trayCard: {
-    borderRadius: 20,
-    borderWidth: 1,
-    overflow: 'hidden',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-  },
   staleWarningBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     backgroundColor: '#FEF3C7',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#FDE68A',
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#F59E0B',
   },
   staleWarningText: {
     fontSize: 12,
     fontWeight: '800',
     color: '#92400E',
     flex: 1,
-  },
-  cameraViewport: {
-    position: 'relative',
-    width: '100%',
-    height: 215,
-    backgroundColor: '#1E293B',
-  },
-  emptyCameraContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-    gap: 8,
-  },
-  emptyCameraIconCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: 'rgba(148, 163, 184, 0.14)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
-  emptyCameraTitle: {
-    color: '#F8FAFC',
-    fontSize: 14,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  emptyCameraSub: {
-    color: '#94A3B8',
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  trayImg: {
-    width: '100%',
-    height: '100%',
-  },
-  floatingAiTag: {
-    position: 'absolute',
-    top: 10,
-    left: 10,
-    right: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(11, 28, 48, 0.86)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-  floatingAiTagText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '600',
-    flex: 1,
-  },
-  freshnessPill: {
-    position: 'absolute',
-    top: 46,
-    right: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-  freshnessPillText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  floatingBottomTag: {
-    position: 'absolute',
-    bottom: 10,
-    left: 10,
-    right: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(11, 28, 48, 0.88)',
-    padding: 8,
-    borderRadius: 12,
-  },
-  activityIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#9D4300',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  activityTitle: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  activitySub: {
-    color: 'rgba(255, 255, 255, 0.85)',
-    fontSize: 11,
-  },
-  btnScanTray: {
-    height: 48,
-    backgroundColor: '#006E2D',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  btnScanTrayText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  appetiteCard: {
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: 1,
-    gap: 10,
-  },
-  appetiteHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  appetiteHeading: {
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 0.2,
-    flex: 1,
-  },
-  fisScoreTag: {
-    fontSize: 11,
-    fontWeight: '900',
-    color: '#EA580C',
-    backgroundColor: '#FFEDD5',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 999,
-  },
-  appetiteButtons: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  appetiteBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    borderRadius: 12,
-    backgroundColor: '#EFF4FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'transparent',
-    gap: 1,
-  },
-  appetiteCode: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#8C7164',
-  },
-  appetiteText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#0B1C30',
-    textAlign: 'center',
-  },
-  appetiteSub: {
-    fontSize: 9,
-    color: '#584237',
-    textAlign: 'center',
+    lineHeight: 17,
   },
   sectionHeader: {
     flexDirection: 'row',

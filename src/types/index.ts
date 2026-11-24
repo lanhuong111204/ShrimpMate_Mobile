@@ -4,7 +4,6 @@ export * from './farm';
 export * from './pond';
 export * from './device';
 export * from './telemetry';
-export * from './camera';
 export * from './feeding';
 export * from './alert';
 export * from './safety-rule';

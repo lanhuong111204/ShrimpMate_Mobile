@@ -16,7 +16,7 @@ export interface SafetyRule {
 }
 
 export interface EvaluateSafetyRequest {
-  deviceId: string;
+  deviceId?: string;
   requestedAmountKg: number;
 }
 

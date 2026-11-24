@@ -1,5 +1,14 @@
 export type AiSafetyDecision = 'allowed' | 'adjusted' | 'blocked';
 
+export interface FeatureContribution {
+  feature: string;
+  name: string;
+  value: number | string;
+  impact: 'INCREASE' | 'DECREASE' | 'NEUTRAL';
+  deltaKg: number;
+  description: string;
+}
+
 export interface AiRecommendation {
   id: string;
   pondId: string;
@@ -7,20 +16,30 @@ export interface AiRecommendation {
   modelVersion: string;
   predictedFeedAmountKg: number;
   safeAllowedAmountKg?: number;
-  spreadRateKgPerMinute: number;
-  appetiteLevel: number;
-  biomassKg: number;
-  feedRatePercent?: number;
-  anomalyScore: number;
-  confidence: number;
+  baseValueKg?: number | null;
+  spreadRateKgPerMinute?: number | null;
+  appetiteLevel?: number | null;
+  biomassKg?: number | null;
+  feedRatePercent?: number | null;
+  anomalyScore?: number | null;
+  confidence?: number | null;
   safetyDecision: AiSafetyDecision;
   safetyReason: string | null;
   safetyReasons?: string[];
   explanation: string;
+  featureContributions?: FeatureContribution[];
+  inputSnapshot?: Record<string, any>;
   createdAt?: string;
 }
 
 export interface PredictFeedOverrideDto {
+  doc?: number;
+  avgWeightG?: number;
+  doMin?: number;
+  deltaTan?: number;
+  morningRainMm?: number;
+  prevFeedAmountKg?: number;
+  waterChangeM3?: number;
   shrimpAgeDays?: number;
   averageWeightG?: number;
   shrimpCount?: number;
@@ -39,13 +58,18 @@ export interface PredictFeedOverrideDto {
 export interface PredictFeedResponse {
   recommendationId: string;
   pondId: string;
+  modelName?: string;
+  modelVersion?: string;
   predictedFeedAmountKg: number;
   safeAllowedAmountKg: number;
-  biomassKg: number;
-  feedRatePercent: number;
+  baseValueKg?: number | null;
+  biomassKg?: number;
+  feedRatePercent?: number;
   safetyDecision: AiSafetyDecision;
   safetyReasons: string[];
   explanation: string;
+  featureContributions?: FeatureContribution[];
+  inputSnapshot?: Record<string, any>;
   createdAt: string;
 }
 
@@ -60,5 +84,5 @@ export interface PredictedTrendsResponse {
   adaptiveAction: string;
   decision: AiSafetyDecision;
   reasons: string[];
-  recommendation: AiRecommendation | null;
+  recommendation: string | AiRecommendation | null;
 }
