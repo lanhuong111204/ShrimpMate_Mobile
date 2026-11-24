@@ -8,6 +8,8 @@ import React, {
   useState,
 } from 'react';
 import { Alert } from 'react-native';
+import { AppConfig } from '@/constants/config';
+import { Storage } from '@/utils/storage';
 import { useAuth } from '@/context/auth-context';
 import { farmPondService } from '@/api/services/farm-pond.service';
 import { pondService } from '@/api/services/pond.service';
@@ -141,6 +143,12 @@ interface FarmContextType {
   feederRadius: '3m' | '6m' | '9m';
   hopperKg: number;
   isEmergencyStopped: boolean;
+  liveFeedingProgress: {
+    progressPercent?: number;
+    rpm?: number;
+    actualAmountKg?: number;
+    requestedAmountKg?: number;
+  } | null;
   toggleFeederPause: () => Promise<void>;
   addFeederKg: (kg: number) => Promise<void>;
   setFeederRadius: (r: '3m' | '6m' | '9m') => void;
@@ -235,6 +243,12 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
   const [feederRadius, setFeederRadius] = useState<'3m' | '6m' | '9m'>('6m');
   const [hopperKg, setHopperKg] = useState<number>(0);
   const [isEmergencyStopped, setIsEmergencyStopped] = useState<boolean>(false);
+  const [liveFeedingProgress, setLiveFeedingProgress] = useState<{
+    progressPercent?: number;
+    rpm?: number;
+    actualAmountKg?: number;
+    requestedAmountKg?: number;
+  } | null>(null);
 
   // Refs chống race condition và stale closure cho WebSocket
   const fetchSeqRef = useRef(0);
@@ -292,6 +306,7 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
     setHopperKg(0);
     setFeederPaused(false);
     setIsEmergencyStopped(false);
+    setLiveFeedingProgress(null);
   }, []);
 
   /**
@@ -335,12 +350,12 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
         if (telemetry) {
           setFarmInfo((prev) => ({
             ...prev,
-            waterTemp: telemetry.temperatureC,
-            dissolvedOxygen: telemetry.dissolvedOxygenMgL,
-            ph: telemetry.ph,
-            salinity: telemetry.salinityPpt,
-            nh3: telemetry.ammoniaMgL,
-            turbidity: telemetry.turbidityNtu,
+            waterTemp: telemetry.temperatureC ?? undefined,
+            dissolvedOxygen: telemetry.dissolvedOxygenMgL ?? undefined,
+            ph: telemetry.ph ?? undefined,
+            salinity: telemetry.salinityPpt ?? undefined,
+            nh3: telemetry.ammoniaMgL ?? undefined,
+            turbidity: telemetry.turbidityNtu ?? undefined,
             measuredAt: telemetry.measuredAt,
           }));
         } else {
@@ -560,6 +575,21 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
   }, [isAuthenticated, user?.id, user?.fullName, loadPondOperationalData, clearPondOperationalState]);
 
   useEffect(() => {
+    void (async () => {
+      try {
+        const storedInv = await Storage.getJSON<InventoryItem[]>(
+          AppConfig.storageKeys.cachedInventory
+        );
+        if (Array.isArray(storedInv) && storedInv.length > 0) {
+          setInventory(storedInv);
+        }
+      } catch {
+        // Ignore corrupt cache
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
     loadFarmsAndPonds();
   }, [loadFarmsAndPonds]);
 
@@ -579,57 +609,41 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
       if (!payload || payload.pondId !== selectedPondIdRef.current) return;
 
       const prev = latestTelemetryRef.current;
+      const toOptNum = (v: unknown, fb: number | null | undefined) => {
+        if (v === undefined) return fb;
+        if (v === null) return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : fb;
+      };
       const nextReading: TelemetryReading = {
         id: String(payload.readingId ?? payload.id ?? prev?.id ?? `ws-${Date.now()}`),
         pondId: String(payload.pondId),
         deviceId: String(payload.deviceId ?? prev?.deviceId ?? ''),
         measuredAt: String(payload.measuredAt ?? payload.emittedAt ?? new Date().toISOString()),
-        ph:
-          payload.ph !== undefined && payload.ph !== null
-            ? Number(payload.ph)
-            : (prev?.ph ?? 0),
-        dissolvedOxygenMgL:
-          payload.dissolvedOxygenMgL !== undefined && payload.dissolvedOxygenMgL !== null
-            ? Number(payload.dissolvedOxygenMgL)
-            : payload.do !== undefined && payload.do !== null
-            ? Number(payload.do)
-            : (prev?.dissolvedOxygenMgL ?? 0),
-        temperatureC:
-          payload.temperatureC !== undefined && payload.temperatureC !== null
-            ? Number(payload.temperatureC)
-            : payload.temperature !== undefined && payload.temperature !== null
-            ? Number(payload.temperature)
-            : (prev?.temperatureC ?? 0),
-        salinityPpt:
-          payload.salinityPpt !== undefined && payload.salinityPpt !== null
-            ? Number(payload.salinityPpt)
-            : payload.salinity !== undefined && payload.salinity !== null
-            ? Number(payload.salinity)
-            : (prev?.salinityPpt ?? 0),
-        ammoniaMgL:
-          payload.ammoniaMgL !== undefined && payload.ammoniaMgL !== null
-            ? Number(payload.ammoniaMgL)
-            : payload.nh3 !== undefined && payload.nh3 !== null
-            ? Number(payload.nh3)
-            : (prev?.ammoniaMgL ?? 0),
-        turbidityNtu:
-          payload.turbidityNtu !== undefined && payload.turbidityNtu !== null
-            ? Number(payload.turbidityNtu)
-            : payload.turbidity !== undefined && payload.turbidity !== null
-            ? Number(payload.turbidity)
-            : (prev?.turbidityNtu ?? 0),
+        ph: toOptNum(payload.ph, prev?.ph),
+        dissolvedOxygenMgL: toOptNum(
+          payload.dissolvedOxygenMgL ?? payload.do,
+          prev?.dissolvedOxygenMgL
+        ),
+        temperatureC: toOptNum(
+          payload.temperatureC ?? payload.temperature,
+          prev?.temperatureC
+        ),
+        salinityPpt: toOptNum(payload.salinityPpt ?? payload.salinity, prev?.salinityPpt),
+        ammoniaMgL: toOptNum(payload.ammoniaMgL ?? payload.nh3, prev?.ammoniaMgL),
+        turbidityNtu: toOptNum(payload.turbidityNtu ?? payload.turbidity, prev?.turbidityNtu),
       };
 
       latestTelemetryRef.current = nextReading;
       setLatestTelemetry(nextReading);
       setFarmInfo((info) => ({
         ...info,
-        waterTemp: nextReading.temperatureC,
-        dissolvedOxygen: nextReading.dissolvedOxygenMgL,
-        ph: nextReading.ph,
-        salinity: nextReading.salinityPpt,
-        nh3: nextReading.ammoniaMgL,
-        turbidity: nextReading.turbidityNtu,
+        waterTemp: nextReading.temperatureC ?? undefined,
+        dissolvedOxygen: nextReading.dissolvedOxygenMgL ?? undefined,
+        ph: nextReading.ph ?? undefined,
+        salinity: nextReading.salinityPpt ?? undefined,
+        nh3: nextReading.ammoniaMgL ?? undefined,
+        turbidity: nextReading.turbidityNtu ?? undefined,
         measuredAt: nextReading.measuredAt,
       }));
     });
@@ -671,6 +685,21 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
           );
           setIsEmergencyStopped(nextMode === 'emergency_stop');
           setFeederPaused(nextMode === 'manual' || nextMode === 'emergency_stop');
+        }
+
+        if (payload.status === 'completed' || payload.status === 'stopped') {
+          setLiveFeedingProgress(null);
+        } else if (
+          payload.progressPercent !== undefined ||
+          payload.rpm !== undefined ||
+          payload.actualAmountKg !== undefined
+        ) {
+          setLiveFeedingProgress((prev) => ({
+            progressPercent: payload.progressPercent ?? prev?.progressPercent,
+            rpm: payload.rpm ?? prev?.rpm,
+            actualAmountKg: payload.actualAmountKg ?? prev?.actualAmountKg,
+            requestedAmountKg: payload.requestedAmountKg ?? prev?.requestedAmountKg,
+          }));
         }
 
         if (payload.recordId) {
@@ -750,6 +779,7 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
           }
           seenCompletedIdsRef.current.add(dedupeKey);
         }
+        setLiveFeedingProgress(null);
         void loadPondOperationalData(payload.pondId, { silent: true });
       }
     );
@@ -1225,8 +1255,8 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
   }, [selectedPond?.id, feederDevice?.id]);
 
   const dispenseFeedBag = useCallback((itemId: string, kg = 25) => {
-    setInventory((prev) =>
-      prev.map((item) => {
+    setInventory((prev) => {
+      const next = prev.map((item) => {
         if (item.id === itemId && item.stockCount > 0) {
           return {
             ...item,
@@ -1235,8 +1265,10 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
           };
         }
         return item;
-      })
-    );
+      });
+      void Storage.setJSON(AppConfig.storageKeys.cachedInventory, next);
+      return next;
+    });
     setHopperKg((prev) => Math.min(150, prev + kg));
     Alert.alert(
       'Xuất Kho Thành Công',
@@ -1249,7 +1281,11 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
       ...item,
       id: `inv-${Date.now()}`,
     };
-    setInventory((prev) => [newItem, ...prev]);
+    setInventory((prev) => {
+      const next = [newItem, ...prev];
+      void Storage.setJSON(AppConfig.storageKeys.cachedInventory, next);
+      return next;
+    });
     Alert.alert('Thành Công', `Đã nhập thêm "${item.name}" vào kho hàng!`);
   }, []);
 
@@ -1334,6 +1370,7 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
       feederRadius,
       hopperKg,
       isEmergencyStopped,
+      liveFeedingProgress,
       toggleFeederPause,
       addFeederKg,
       setFeederRadius,
@@ -1384,6 +1421,7 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
       feederRadius,
       hopperKg,
       isEmergencyStopped,
+      liveFeedingProgress,
       toggleFeederPause,
       addFeederKg,
       triggerEmergencyStop,

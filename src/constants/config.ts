@@ -37,6 +37,7 @@ export const AppConfig = {
     cachedRecords: '@shrimpmate_cached_records',
     cachedDevices: '@shrimpmate_cached_devices',
     cachedAlerts: '@shrimpmate_cached_alerts',
+    cachedInventory: '@shrimpmate_cached_inventory',
     offlineQueue: '@shrimpmate_offline_queue',
   },
   // Default ideal aquaculture water metric thresholds (Litopenaeus vannamei - tôm thẻ chân trắng)

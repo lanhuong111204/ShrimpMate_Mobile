@@ -37,6 +37,8 @@ export interface FeederStatusSocketPayload {
   requestedAmountKg?: number;
   actualAmountKg?: number | null;
   feedAmountKg?: number;
+  progressPercent?: number;
+  rpm?: number;
   safetyDecision?: string;
   reason?: string;
   stoppedReason?: string | null;

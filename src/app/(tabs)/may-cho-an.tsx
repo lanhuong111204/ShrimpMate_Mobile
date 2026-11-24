@@ -39,6 +39,7 @@ export default function ScreenLiveFeeder() {
     setFeederRadius,
     hopperKg,
     isEmergencyStopped,
+    liveFeedingProgress,
     toggleFeederPause,
     triggerEmergencyStop,
     resetEmergencyStop,
@@ -502,6 +503,37 @@ export default function ScreenLiveFeeder() {
                 ? '⏸ Đang ở chế độ Thủ công • Tạm ngắt lịch tự động'
                 : '⏱ Chu kỳ MQTT: Tốc độ rải 1.5 kg/phút • Kiểm duyệt Safety Rule'}
             </Text>
+
+            {liveFeedingProgress && (
+              <View style={styles.liveProgressBox}>
+                <View style={styles.liveProgressHeader}>
+                  <Text style={styles.liveProgressTitle}>
+                    Đang xả trực tiếp (WebSocket)
+                  </Text>
+                  <Text style={styles.liveProgressMeta}>
+                    {liveFeedingProgress.rpm !== undefined ? `${liveFeedingProgress.rpm} RPM • ` : ''}
+                    {liveFeedingProgress.progressPercent !== undefined
+                      ? `${Math.min(100, Math.round(Number(liveFeedingProgress.progressPercent)))}%`
+                      : 'Đang chạy'}
+                  </Text>
+                </View>
+                {liveFeedingProgress.progressPercent !== undefined && (
+                  <View style={styles.liveProgressTrack}>
+                    <View
+                      style={[
+                        styles.liveProgressFill,
+                        {
+                          width: `${Math.min(
+                            100,
+                            Math.round(Number(liveFeedingProgress.progressPercent))
+                          )}%`,
+                        },
+                      ]}
+                    />
+                  </View>
+                )}
+              </View>
+            )}
           </View>
 
           {/* Hopper (Thùng chứa cám) & Radius Selector */}
@@ -1181,5 +1213,42 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: '#9D4300',
+  },
+  liveProgressBox: {
+    width: '100%',
+    marginTop: 4,
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FDBA74',
+    gap: 6,
+  },
+  liveProgressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  liveProgressTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#EA580C',
+  },
+  liveProgressMeta: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#9D4300',
+  },
+  liveProgressTrack: {
+    width: '100%',
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: '#FFDBCA',
+    overflow: 'hidden',
+  },
+  liveProgressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: '#EA580C',
   },
 });
