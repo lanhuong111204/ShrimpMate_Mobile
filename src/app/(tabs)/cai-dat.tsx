@@ -201,7 +201,7 @@ export default function ScreenSettings() {
   const [newCount, setNewCount] = useState('20');
   const [newCategory, setNewCategory] = useState<InventoryItem['category']>('feed');
 
-  const mainFeed = inventory.find((i) => i.id === 'feed-1');
+  const mainFeed = inventory.find((i) => i.category === 'feed');
 
   const filteredItems = inventory.filter((item) => {
     const matchCategory =
@@ -215,10 +215,10 @@ export default function ScreenSettings() {
 
   const handleQuickDispense = () => {
     if (!mainFeed || mainFeed.stockCount <= 0) {
-      Alert.alert('Cảnh Báo', 'Hết cám số 2 trong kho! Vui lòng nhập thêm bao cám mới.');
+      Alert.alert('Cảnh Báo', 'Hết cám trong kho ghi chú! Vui lòng nhập thêm bao cám mới.');
       return;
     }
-    dispenseFeedBag('feed-1', 25);
+    dispenseFeedBag(mainFeed.id, 25);
   };
 
   const handleAddNewItem = () => {
@@ -489,6 +489,12 @@ export default function ScreenSettings() {
             /* SEGMENT 2: KHO HÀNG VẬT TƯ (Feed, Probiotics, Minerals) */
             /* ==================================================== */
             <View style={styles.suppliesSection}>
+              <View style={styles.localNoticeBanner}>
+                <MaterialIcons name="info-outline" size={16} color="#006398" />
+                <Text style={styles.localNoticeText}>
+                  Sổ ghi chú vật tư cục bộ trên thiết bị (dữ liệu được lưu tự động trên máy).
+                </Text>
+              </View>
               {/* Top Filter Chips & Add Button */}
               <View style={styles.filterTopRow}>
             <ScrollView
@@ -1684,5 +1690,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#8C7164',
     marginTop: 2,
+  },
+  localNoticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 12,
+    backgroundColor: '#EFF4FF',
+    borderWidth: 1,
+    borderColor: '#D3E4FE',
+  },
+  localNoticeText: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#006398',
   },
 });

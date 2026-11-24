@@ -18,8 +18,28 @@ import { AppHeader } from '@/components/common/app-header';
 import { NoAssignedPondState } from '@/components/common/no-assigned-pond';
 import { SafetyBlockedModal } from '@/components/common/safety-blocked-modal';
 import { useFarm } from '@/context/farm-context';
-import { FeatureContribution } from '@/types/ai';
+import { FeatureContribution, PredictFeedOverrideDto } from '@/types/ai';
 import { EvaluateSafetyResponse } from '@/types/safety-rule';
+
+const WHAT_IF_INITIAL = {
+  doc: '',
+  avgWeightG: '',
+  doMin: '',
+  deltaTan: '',
+  morningRainMm: '',
+  prevFeedAmountKg: '',
+  waterChangeM3: '',
+};
+
+const WHAT_IF_FIELDS: { key: keyof typeof WHAT_IF_INITIAL; label: string; placeholder: string }[] = [
+  { key: 'doc', label: 'DOC (ngày)', placeholder: '45' },
+  { key: 'avgWeightG', label: 'ABW (g)', placeholder: '8.5' },
+  { key: 'doMin', label: 'DO min', placeholder: '4.2' },
+  { key: 'deltaTan', label: 'ΔTAN', placeholder: '0.02' },
+  { key: 'morningRainMm', label: 'Mưa (mm)', placeholder: '0' },
+  { key: 'prevFeedAmountKg', label: 'Cữ trước', placeholder: '12' },
+  { key: 'waterChangeM3', label: 'Thay nước', placeholder: '0' },
+];
 
 export default function ScreenFeedingLog() {
   const colors = useTheme();
@@ -49,6 +69,8 @@ export default function ScreenFeedingLog() {
   const [isSubmittingExtra, setIsSubmittingExtra] = useState(false);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const [isPredictingAi, setIsPredictingAi] = useState(false);
+  const [showWhatIf, setShowWhatIf] = useState(false);
+  const [whatIfValues, setWhatIfValues] = useState(WHAT_IF_INITIAL);
   const [blockedModalInfo, setBlockedModalInfo] = useState<{
     visible: boolean;
     reasons: string[];
@@ -147,7 +169,19 @@ export default function ScreenFeedingLog() {
     if (isPredictingAi) return;
     setIsPredictingAi(true);
     try {
-      const res = await requestAiFeedPrediction();
+      const overrides: PredictFeedOverrideDto = {};
+      WHAT_IF_FIELDS.forEach(({ key }) => {
+        const raw = whatIfValues[key].trim();
+        if (raw !== '') {
+          const num = Number(raw);
+          if (Number.isFinite(num)) {
+            overrides[key] = num;
+          }
+        }
+      });
+      const res = await requestAiFeedPrediction(
+        Object.keys(overrides).length > 0 ? overrides : undefined
+      );
       if (!res) {
         Alert.alert('Không thể dự báo AI', 'Chưa thể kết nối máy chủ dự báo AI. Vui lòng thử lại sau.');
       }
@@ -659,6 +693,48 @@ export default function ScreenFeedingLog() {
                       );
                     })}
                   </View>
+                </View>
+              )}
+
+              {/* What-If 7 Feature Override Drawer */}
+              <Pressable
+                onPress={() => setShowWhatIf((v) => !v)}
+                style={styles.whatIfToggle}>
+                <MaterialIcons name="tune" size={15} color="#9D4300" />
+                <Text style={styles.whatIfToggleText}>
+                  Tùy chỉnh 7 thông số thử nghiệm (What-If)
+                </Text>
+                <MaterialIcons
+                  name={showWhatIf ? 'expand-less' : 'expand-more'}
+                  size={18}
+                  color="#9D4300"
+                />
+              </Pressable>
+
+              {showWhatIf && (
+                <View style={styles.whatIfBox}>
+                  <View style={styles.whatIfGrid}>
+                    {WHAT_IF_FIELDS.map((f) => (
+                      <View key={f.key} style={styles.whatIfField}>
+                        <Text style={styles.whatIfLabel}>{f.label}</Text>
+                        <TextInput
+                          style={styles.whatIfInput}
+                          keyboardType="decimal-pad"
+                          placeholder={f.placeholder}
+                          placeholderTextColor="#94A3B8"
+                          value={whatIfValues[f.key]}
+                          onChangeText={(txt) =>
+                            setWhatIfValues((prev) => ({ ...prev, [f.key]: txt }))
+                          }
+                        />
+                      </View>
+                    ))}
+                  </View>
+                  <Pressable
+                    onPress={() => setWhatIfValues(WHAT_IF_INITIAL)}
+                    style={styles.whatIfResetBtn}>
+                    <Text style={styles.whatIfResetText}>Đặt lại mặc định</Text>
+                  </Pressable>
                 </View>
               )}
 
@@ -1581,5 +1657,69 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: '#9D4300',
+  },
+  whatIfToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.85)',
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+  },
+  whatIfToggleText: {
+    flex: 1,
+    marginLeft: 6,
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#9D4300',
+  },
+  whatIfBox: {
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+    gap: 8,
+  },
+  whatIfGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  whatIfField: {
+    width: '30%',
+    flexGrow: 1,
+    gap: 3,
+  },
+  whatIfLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  whatIfInput: {
+    height: 34,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#F8FAFC',
+    paddingHorizontal: 8,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0B1C30',
+  },
+  whatIfResetBtn: {
+    alignSelf: 'flex-end',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#F1F5F9',
+  },
+  whatIfResetText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
   },
 });

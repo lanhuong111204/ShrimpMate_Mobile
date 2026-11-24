@@ -28,8 +28,8 @@ export interface EvaluateSafetyResponse {
   appliedRules: string[];
   telemetrySnapshot?: {
     id?: string;
-    dissolvedOxygenMgL: number;
-    ph: number;
-    temperatureC: number;
+    dissolvedOxygenMgL?: number | null;
+    ph?: number | null;
+    temperatureC?: number | null;
   };
 }

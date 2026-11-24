@@ -38,6 +38,12 @@ function isValidUuid(value: unknown): value is string {
   return typeof value === 'string' && UUID_REGEX.test(value.trim());
 }
 
+function toOptionalNum(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function toNullableNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
@@ -104,13 +110,13 @@ function normalizeFeedingRecords(items: any[]): FeedingRecord[] {
 }
 
 /**
- * Đánh giá trạng thái an toàn sinh học của 6 chỉ số nước theo chuẩn Chương 7 PDF:
- * - DO: xanh (optimal) >= 5.0, vàng (warning) 3.5 - 5.0, đỏ (critical) < 3.5 mg/L
- * - pH: xanh (optimal) 7.5 - 8.5, vàng (warning) 7.0 - 7.5 hoặc 8.5 - 9.0, đỏ (critical) < 7.0 hoặc > 9.0
- * - Temp: thích hợp (optimal) 28 - 32°C
- * - Salinity: thích hợp (optimal) 10 - 25 ppt
- * - NH3: nguy hiểm (critical) > 0.3 mg/L, cần chú ý (warning) 0.05 - 0.3 mg/L
- * - Turbidity: thích hợp (optimal) 10 - 40 NTU
+ * Đánh giá trạng thái an toàn sinh học của 6 chỉ số nước — đồng bộ 100% với Backend WATER_QUALITY_THRESHOLDS:
+ * - DO: an toàn (optimal) >= 4.0 (tối ưu >= 5.0), cảnh báo 3.5 - < 4.0, nguy hiểm (critical) < 3.5 mg/L
+ * - pH: an toàn 7.2 - 8.8 (tối ưu 7.5 - 8.5), cảnh báo 7.0 - < 7.2 hoặc > 8.8 - 9.0, nguy hiểm < 7.0 hoặc > 9.0
+ * - Temp: an toàn 26.0 - 33.5°C (tối ưu 28.0 - 32.0°C), cảnh báo 22.0 - < 26.0 hoặc > 33.5 - 35.0°C, nguy hiểm < 22.0 hoặc > 35.0°C
+ * - Salinity: an toàn 5.0 - 30.0‰ (tối ưu 10.0 - 25.0‰), cảnh báo 2.0 - < 5.0 hoặc > 30.0 - 35.0‰, nguy hiểm < 2.0 hoặc > 35.0‰
+ * - NH3: an toàn <= 0.1 mg/L (tối ưu <= 0.05 mg/L), cảnh báo > 0.1 - 0.3 mg/L, nguy hiểm > 0.3 mg/L
+ * - Turbidity: an toàn <= 60.0 NTU (tối ưu 20.0 - 40.0 NTU), cảnh báo > 60.0 - 80.0 NTU, nguy hiểm > 80.0 NTU
  */
 export function evaluateWaterMetricStatus(type: WaterMetricType, value: number): StatusLevel {
   if (typeof value !== 'number' || Number.isNaN(value)) {
@@ -119,27 +125,27 @@ export function evaluateWaterMetricStatus(type: WaterMetricType, value: number):
   switch (type) {
     case 'do':
       if (value < 3.5) return 'critical';
-      if (value < 5.0) return 'warning';
+      if (value < 4.0) return 'warning';
       return 'optimal';
     case 'ph':
       if (value < 7.0 || value > 9.0) return 'critical';
-      if (value < 7.5 || value > 8.5) return 'warning';
+      if (value < 7.2 || value > 8.8) return 'warning';
       return 'optimal';
     case 'nh3':
       if (value > 0.3) return 'critical';
-      if (value >= 0.05) return 'warning';
+      if (value > 0.1) return 'warning';
       return 'optimal';
     case 'temperature':
-      if (value < 24.0 || value > 34.0) return 'critical';
-      if (value < 28.0 || value > 32.0) return 'warning';
+      if (value < 22.0 || value > 35.0) return 'critical';
+      if (value < 26.0 || value > 33.5) return 'warning';
       return 'optimal';
     case 'salinity':
-      if (value < 5.0 || value > 35.0) return 'critical';
-      if (value < 10.0 || value > 25.0) return 'warning';
+      if (value < 2.0 || value > 35.0) return 'critical';
+      if (value < 5.0 || value > 30.0) return 'warning';
       return 'optimal';
     case 'turbidity':
-      if (value < 5.0 || value > 80.0) return 'critical';
-      if (value < 10.0 || value > 40.0) return 'warning';
+      if (value > 80.0) return 'critical';
+      if (value > 60.0) return 'warning';
       return 'optimal';
     default:
       return 'optimal';
@@ -211,15 +217,31 @@ export const pondService = {
     const normalizeTelemetry = (raw: any): TelemetryReading | null => {
       if (!raw || typeof raw !== 'object') return null;
       const item = raw.data && typeof raw.data === 'object' ? raw.data : raw;
-      if (item.ph === undefined || item.ph === null || isNaN(Number(item.ph))) return null;
+      const ph = toOptionalNum(item.ph);
+      const dissolvedOxygenMgL = toOptionalNum(item.dissolvedOxygenMgL ?? item.do);
+      const temperatureC = toOptionalNum(item.temperatureC ?? item.temperature);
+      const salinityPpt = toOptionalNum(item.salinityPpt ?? item.salinity);
+      const ammoniaMgL = toOptionalNum(item.ammoniaMgL ?? item.nh3);
+      const turbidityNtu = toOptionalNum(item.turbidityNtu ?? item.turbidity);
+
+      const hasAnyMetric =
+        ph !== undefined ||
+        dissolvedOxygenMgL !== undefined ||
+        temperatureC !== undefined ||
+        salinityPpt !== undefined ||
+        ammoniaMgL !== undefined ||
+        turbidityNtu !== undefined;
+
+      if (!item.id && !hasAnyMetric) return null;
+
       return {
         ...item,
-        ph: Number(item.ph),
-        dissolvedOxygenMgL: Number(item.dissolvedOxygenMgL ?? item.do ?? 0),
-        temperatureC: Number(item.temperatureC ?? item.temperature ?? 0),
-        salinityPpt: Number(item.salinityPpt ?? item.salinity ?? 0),
-        ammoniaMgL: Number(item.ammoniaMgL ?? item.nh3 ?? 0),
-        turbidityNtu: Number(item.turbidityNtu ?? item.turbidity ?? 0),
+        ph: ph ?? null,
+        dissolvedOxygenMgL: dissolvedOxygenMgL ?? null,
+        temperatureC: temperatureC ?? null,
+        salinityPpt: salinityPpt ?? null,
+        ammoniaMgL: ammoniaMgL ?? null,
+        turbidityNtu: turbidityNtu ?? null,
       };
     };
 
@@ -504,9 +526,9 @@ export const pondService = {
         };
       }
       const doVal = fallbackTelemetry.dissolvedOxygenMgL;
-      const phVal = fallbackTelemetry.ph;
-      const nh3Val = fallbackTelemetry.ammoniaMgL;
-      const tempVal = fallbackTelemetry.temperatureC;
+      const phVal = fallbackTelemetry.ph ?? undefined;
+      const nh3Val = fallbackTelemetry.ammoniaMgL ?? undefined;
+      const tempVal = fallbackTelemetry.temperatureC ?? undefined;
 
       const reasons: string[] = [];
       const appliedRules: string[] = [];
@@ -517,13 +539,13 @@ export const pondService = {
         );
         appliedRules.push('DO_CRITICAL_BLOCKED');
       }
-      if (phVal < 7.0 || phVal > 9.0) {
+      if (phVal !== undefined && (phVal < 7.0 || phVal > 9.0)) {
         reasons.push(
           `Độ pH nước (${phVal}) vượt ngưỡng nguy hiểm (< 7.0 hoặc > 9.0). Cấm xả thức ăn.`
         );
         appliedRules.push('PH_CRITICAL_BLOCKED');
       }
-      if (nh3Val > 0.3) {
+      if (nh3Val !== undefined && nh3Val > 0.3) {
         reasons.push(
           `Khí độc NH3 (${nh3Val} mg/L) vượt ngưỡng nguy hiểm (> 0.3 mg/L). Cấm xả thức ăn.`
         );
@@ -545,14 +567,18 @@ export const pondService = {
         };
       }
 
-      if (doVal < 5.0 || phVal < 7.5 || phVal > 8.5 || nh3Val >= 0.05) {
+      if (
+        doVal < 4.0 ||
+        (phVal !== undefined && (phVal < 7.2 || phVal > 8.8)) ||
+        (nh3Val !== undefined && nh3Val > 0.1)
+      ) {
         const adjustedKg = Number((payload.requestedAmountKg * 0.7).toFixed(1));
         return {
           decision: 'adjusted',
           allowedAmountKg: adjustedKg,
           requestedAmountKg: payload.requestedAmountKg,
           reasons: [
-            `Oxy hòa tan (${doVal} mg/L) hoặc chỉ số nước ở mức cần chú ý (3.5 - 5.0 mg/L). Hệ thống tự động giảm 30% khẩu phần xuống ${adjustedKg} kg để đảm bảo an toàn.`,
+            `Oxy hòa tan (${doVal} mg/L) hoặc chỉ số nước ở mức cần chú ý. Hệ thống tự động giảm 30% khẩu phần xuống ${adjustedKg} kg để đảm bảo an toàn.`,
           ],
           appliedRules: ['DO_WARNING_ADJUSTED_70_PERCENT'],
           telemetrySnapshot: {
@@ -567,7 +593,7 @@ export const pondService = {
         decision: 'allowed',
         allowedAmountKg: payload.requestedAmountKg,
         requestedAmountKg: payload.requestedAmountKg,
-        reasons: ['Các chỉ số môi trường nước nằm trong ngưỡng tối ưu. Cho phép xả 100% khẩu phần.'],
+        reasons: ['Các chỉ số môi trường nước nằm trong ngưỡng an toàn. Cho phép xả 100% khẩu phần.'],
         appliedRules: [],
         telemetrySnapshot: {
           dissolvedOxygenMgL: doVal,
@@ -690,12 +716,12 @@ export const pondService = {
       pondId: item.pondId,
       timestamp: item.measuredAt,
       metrics: {
-        temperature: item.temperatureC,
-        do: item.dissolvedOxygenMgL,
-        ph: item.ph,
-        salinity: item.salinityPpt,
-        nh3: item.ammoniaMgL,
-        turbidity: item.turbidityNtu,
+        temperature: Number(item.temperatureC ?? 0),
+        do: Number(item.dissolvedOxygenMgL ?? 0),
+        ph: Number(item.ph ?? 0),
+        salinity: Number(item.salinityPpt ?? 0),
+        nh3: Number(item.ammoniaMgL ?? 0),
+        turbidity: Number(item.turbidityNtu ?? 0),
         orp: 300,
       },
     }));
