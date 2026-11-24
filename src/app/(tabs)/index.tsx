@@ -241,6 +241,42 @@ export default function ScreenFeedingLog() {
     }
   };
 
+  const handleSuggestAiForQuickFeed = async () => {
+    if (isPredictingAi) return;
+    setIsPredictingAi(true);
+    try {
+      const res = await requestAiFeedPrediction();
+      if (!res) {
+        Alert.alert('Không thể lấy gợi ý AI', 'Chưa thể kết nối máy chủ dự báo AI. Vui lòng thử lại sau.');
+        return;
+      }
+      const suggested = Number(res.safeAllowedAmountKg ?? res.predictedFeedAmountKg ?? 0);
+      if (suggested > 0) {
+        const nextVal = suggested.toFixed(1);
+        setExtraKg(nextVal);
+        setIsEvaluating(true);
+        try {
+          const ev = await evaluateSafetyBeforeFeed(Number(nextVal));
+          setSafetyPreview(ev);
+        } finally {
+          setIsEvaluating(false);
+        }
+      } else if (res.safetyDecision === 'blocked') {
+        setShowExtraModal(false);
+        setBlockedModalInfo({
+          visible: true,
+          reasons:
+            res.safetyReasons?.length > 0
+              ? res.safetyReasons
+              : ['AI / Safety Rule Engine đang khóa cho ăn do môi trường nước chưa đạt chuẩn.'],
+          telemetrySnapshot: null,
+        });
+      }
+    } finally {
+      setIsPredictingAi(false);
+    }
+  };
+
   const handleSaveExtraMeal = async () => {
     const parsedKg = parseFloat(extraKg);
     if (isNaN(parsedKg) || parsedKg <= 0) {
@@ -837,6 +873,22 @@ export default function ScreenFeedingLog() {
                 onChangeText={handleChangeExtraKg}
                 placeholder="Ví dụ: 5.0"
               />
+              <Pressable
+                onPress={handleSuggestAiForQuickFeed}
+                disabled={isPredictingAi}
+                style={({ pressed }) => [
+                  styles.aiSuggestBtn,
+                  { opacity: pressed || isPredictingAi ? 0.75 : 1 },
+                ]}>
+                {isPredictingAi ? (
+                  <ActivityIndicator size="small" color="#EA580C" />
+                ) : (
+                  <MaterialIcons name="auto-awesome" size={16} color="#EA580C" />
+                )}
+                <Text style={styles.aiSuggestBtnText}>
+                  {isPredictingAi ? 'Đang chạy dự báo AI...' : 'Gợi ý lượng cám từ AI (XGBoost)'}
+                </Text>
+              </Pressable>
             </View>
 
             <View style={styles.inputGroup}>
@@ -1511,5 +1563,23 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '800',
+  },
+  aiSuggestBtn: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FDBA74',
+  },
+  aiSuggestBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#9D4300',
   },
 });

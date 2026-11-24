@@ -27,6 +27,7 @@ export default function ScreenLiveFeeder() {
     farmInfo,
     latestTelemetry,
     predictedTrends,
+    requestAiFeedPrediction,
     feederDevice,
     lastSafetyEvaluation,
     evaluateSafetyBeforeFeed,
@@ -56,6 +57,7 @@ export default function ScreenLiveFeeder() {
   const [isTriggeringFeed, setIsTriggeringFeed] = useState(false);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const [isTogglingEStop, setIsTogglingEStop] = useState(false);
+  const [isPredictingQuickFeed, setIsPredictingQuickFeed] = useState(false);
   const [blockedModalInfo, setBlockedModalInfo] = useState<{
     visible: boolean;
     reasons: string[];
@@ -155,6 +157,42 @@ export default function ScreenLiveFeeder() {
           setIsEvaluatingSafety(false);
         }
       }, 300);
+    }
+  };
+
+  const handleSuggestAiQuickFeed = async () => {
+    if (isPredictingQuickFeed) return;
+    setIsPredictingQuickFeed(true);
+    try {
+      const res = await requestAiFeedPrediction();
+      if (!res) {
+        Alert.alert('Không thể lấy gợi ý AI', 'Chưa thể kết nối máy chủ dự báo AI. Vui lòng thử lại sau.');
+        return;
+      }
+      const suggested = Number(res.safeAllowedAmountKg ?? res.predictedFeedAmountKg ?? 0);
+      if (suggested > 0) {
+        const nextVal = suggested.toFixed(1);
+        setQuickFeedKg(nextVal);
+        setIsEvaluatingSafety(true);
+        try {
+          const ev = await evaluateSafetyBeforeFeed(Number(nextVal));
+          setSafetyPreview(ev);
+        } finally {
+          setIsEvaluatingSafety(false);
+        }
+      } else if (res.safetyDecision === 'blocked') {
+        setShowQuickFeedModal(false);
+        setBlockedModalInfo({
+          visible: true,
+          reasons:
+            res.safetyReasons?.length > 0
+              ? res.safetyReasons
+              : ['AI / Safety Rule Engine đang khóa cho ăn do môi trường nước chưa đạt chuẩn.'],
+          telemetrySnapshot: null,
+        });
+      }
+    } finally {
+      setIsPredictingQuickFeed(false);
     }
   };
 
@@ -670,6 +708,22 @@ export default function ScreenLiveFeeder() {
                 onChangeText={handleReEvaluateSafety}
                 placeholder="Nhập số kg (ví dụ: 5.0)"
               />
+              <Pressable
+                onPress={handleSuggestAiQuickFeed}
+                disabled={isPredictingQuickFeed}
+                style={({ pressed }) => [
+                  styles.aiSuggestBtn,
+                  { opacity: pressed || isPredictingQuickFeed ? 0.75 : 1 },
+                ]}>
+                {isPredictingQuickFeed ? (
+                  <ActivityIndicator size="small" color="#EA580C" />
+                ) : (
+                  <MaterialIcons name="auto-awesome" size={16} color="#EA580C" />
+                )}
+                <Text style={styles.aiSuggestBtnText}>
+                  {isPredictingQuickFeed ? 'Đang chạy dự báo AI...' : 'Gợi ý lượng cám từ AI (XGBoost)'}
+                </Text>
+              </Pressable>
             </View>
 
             {/* Safety Evaluation Result Box */}
@@ -1109,5 +1163,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#78350F',
     lineHeight: 17,
+  },
+  aiSuggestBtn: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FDBA74',
+  },
+  aiSuggestBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#9D4300',
   },
 });
